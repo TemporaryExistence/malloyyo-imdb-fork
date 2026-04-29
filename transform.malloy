@@ -60,7 +60,7 @@ type: title_type is {
 source: titles_base is raw_titles -> {
 	join_one: raw_ratings on tconst = raw_ratings.tconst
 	join_one: raw_crew on tconst = raw_crew.tconst
-	where: raw_ratings.numVotes::number > 5000
+	where: raw_ratings.numVotes::number > 5000 and titleType = 'movie'
 	select:
 		tconst
 		isAdult, originalTitle, primaryTitle
@@ -113,7 +113,8 @@ source: principals_base is raw_principals -> {
 
 type: year_ratings is {
   startYear:: number,
-  year_ratings:: number,
+  year_ratings_acting:: number,
+  year_ratings_directing:: number,
   year_rank:: number
 }
 
@@ -123,9 +124,11 @@ type: person_type is {
   deathYear:: number,
   primaryName:: string,
   primaryProfession:: string,
-	lifetime_rank:: number,
-	lifetime_ratings:: number,
-	by_year:: year_ratings[]
+  lifetime_rank_acting:: number,
+  lifetime_ratings_acting:: number,
+  lifetime_rank_directing:: number,
+  lifetime_ratings_directing:: number,
+  by_year:: year_ratings[]
 }
 
 #@ persist name="names"
@@ -133,7 +136,7 @@ source: people_base is   raw_names -> {
 	join_many: principals is principals_base on nconst = principals.nconst
 	join_one: titles is titles_base on principals.tconst = titles.tconst
 	where: principals.nconst is not null
-	group_by: 
+	group_by:
 		nconst
 		primaryName
 		primaryProfession
@@ -141,10 +144,11 @@ source: people_base is   raw_names -> {
 		deathYear is deathYear:::number
 		titles.startYear
 	aggregate:
-		year_ratings is titles.averageRating.sum()
+		year_ratings_acting is titles.averageRating.sum() {where: principals.category = 'actor' | 'actress' }
+		year_ratings_directing is titles.averageRating.sum() {where: principals.category = 'director' }
 	calculate:
-		year_rank is rank() {partition_by: startYear order_by: year_ratings desc}
-	} 
+		year_rank is rank() {partition_by: startYear order_by: year_ratings_acting desc}
+	}
 	-> {
 		group_by:
 			nconst
@@ -153,13 +157,16 @@ source: people_base is   raw_names -> {
 			birthYear is birthYear:::number
 			deathYear is deathYear:::number
 		aggregate:
-		  lifetime_ratings is year_ratings.sum()
+		  lifetime_ratings_acting is year_ratings_acting.sum()
+		  lifetime_ratings_directing is year_ratings_directing.sum()
 		calculate:
-		  lifetime_rank is rank() {order_by: lifetime_ratings desc}
+		  lifetime_rank_acting is rank() {order_by: lifetime_ratings_acting desc}
+		  lifetime_rank_directing is rank() {order_by: lifetime_ratings_directing desc}
 		nest: by_year is {
-			group_by: 
+			group_by:
 				startYear
-				year_ratings
+				year_ratings_acting
+				year_ratings_directing
 				year_rank
 		}
 	}::person_type
