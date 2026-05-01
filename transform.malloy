@@ -144,8 +144,8 @@ source: people_base is   raw_names -> {
 		deathYear is deathYear:::number
 		titles.startYear
 	aggregate:
-		year_ratings_acting is titles.averageRating.sum() {where: principals.category = 'actor' | 'actress' }
-		year_ratings_directing is titles.averageRating.sum() {where: principals.category = 'director' }
+		year_ratings_acting is titles.numVotes.sum() {where: principals.category = 'actor' | 'actress' }
+		year_ratings_directing is titles.numVotes.sum() {where: principals.category = 'director' }
 	calculate:
 		year_rank is rank() {partition_by: startYear order_by: year_ratings_acting desc}
 	}
@@ -169,5 +169,6 @@ source: people_base is   raw_names -> {
 				year_ratings_directing
 				year_rank
 		}
+		order_by: nconst
 	}::person_type
 

@@ -2,7 +2,7 @@
   "connections": {
     "imdb": {
       "is": "duckdb",
-      "databasePath": "/home/lloydtabb/dev/malloy-imdb/data/imdb.duckdb"
+      "databasePath":"data/imdb.duckdb"
     }
   }
 }
