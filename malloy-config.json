@@ -2,7 +2,7 @@
   "connections": {
     "imdb": {
       "is": "duckdb",
-      "databasePath":"data/imdb.duckdb"
+      "databasePath":"/tmp/imdb.duckdb"
     }
   }
 }
