@@ -1,5 +1,4 @@
 import {createHttpHandler} from '@malloydata/cli/mcp-http';
-import type {IncomingMessage, ServerResponse} from 'node:http';
 
 // Tell Vercel not to pre-parse the request body — the MCP transport reads the
 // raw stream directly.
@@ -9,9 +8,7 @@ export const config = {
 
 const handle = createHttpHandler();
 
-export default async function (
-  req: IncomingMessage,
-  res: ServerResponse
-): Promise<void> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export default async function (req: any, res: any): Promise<void> {
   await handle(req, res);
 }
