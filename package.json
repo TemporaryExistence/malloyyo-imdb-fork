@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@malloydata/cli": "file:malloydata-cli-0.0.54.tgz"
+  }
+}
