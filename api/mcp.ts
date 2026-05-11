@@ -1,14 +1,13 @@
+console.log('module loading...');
+
 import {createHttpHandler} from '@malloydata/cli/mcp-http';
 
-// Tell Vercel not to pre-parse the request body — the MCP transport reads the
-// raw stream directly.
-export const config = {
-  api: {bodyParser: false},
-};
-
+console.log('import done, calling createHttpHandler...');
 const handle = createHttpHandler();
+console.log('handler created');
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default async function (req: any, res: any): Promise<void> {
+  console.log('request received:', req.method, req.url);
   await handle(req, res);
+  console.log('request done');
 }
