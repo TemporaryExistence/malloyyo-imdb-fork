@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "vercel-build": "cp malloy-config.json api/ && cp *.malloy api/ && mkdir -p api/data && cp data/imdb.duckdb api/data/"
+  },
   "dependencies": {
     "@malloydata/cli": "file:malloydata-cli-0.0.54.tgz"
   }

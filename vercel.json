@@ -1,6 +1,5 @@
 {
-  "buildCommand": "cp malloy-config.json api/ && cp *.malloy api/ && mkdir -p api/data && cp data/imdb.duckdb api/data/",
-  "functions": {
+"functions": {
     "api/mcp.ts": {
       "maxDuration": 60
     }
