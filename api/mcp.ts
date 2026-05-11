@@ -1,13 +1,6 @@
-console.log('module loading...');
-
-import {createHttpHandler} from '@malloydata/cli/mcp-http';
-
-console.log('import done, calling createHttpHandler...');
-const handle = createHttpHandler();
-console.log('handler created');
-
+// Minimal test — no Malloy, just prove the function runtime works
 export default async function (req: any, res: any): Promise<void> {
-  console.log('request received:', req.method, req.url);
-  await handle(req, res);
-  console.log('request done');
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ok: true, method: req.method, url: req.url}));
 }
