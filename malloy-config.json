@@ -1,8 +1,8 @@
 {
   "connections": {
-    "imdb": {
+    "duckdb": {
       "is": "duckdb",
-      "databasePath":"/tmp/imdb.duckdb"
+      "databasePath":"md:mayolo"
     }
   }
 }

@@ -1,31 +1,24 @@
 ##! experimental.virtual_source experimental.persistence experimental.join_types
 
-// Information courtesy of IMDb (https://www.imdb.com).
-// Used with permissiion.
-// For personal / educational use only
-//
-//  Github: hmttps://github.com/lloydtabb/imdb_fiddle
-//  About Fiddles: https://github.com/lloydtabb/malloy_fiddle_dist/
-import "transform.malloy"
 
-source: people is people_base :: person_type extend {
+source: people is duckdb.table('imdb_names') extend {
   // cast, crew, everyone involved in movies
   primary_key: nconst
 }
 
-source: principals is principals_base extend {
+source: principals is duckdb.table('imdb_principals') extend {
   // a mapping table that links people to movies, along with their job on that movie.
   join_one: people is people on nconst = people.nconst
   measure: principal_count is count()
 }
 
-query: genre_movie_map is titles_base -> {
+query: genre_movie_map is duckdb.table('imdb_titles') -> {
   group_by:
     tconst
     genre is genres.value
 }
 
-source: movies is titles_base extend {
+source: movies is duckdb.table('imdb_titles') extend {
   // all the movies
   join_many: principals on tconst = principals.tconst
   join_many: principals2 is principals on tconst = principals2.tconst

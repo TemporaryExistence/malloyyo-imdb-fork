@@ -1,8 +1,0 @@
-{
-  "functions": {
-    "api/mcp.ts": {
-      "maxDuration": 60,
-      "includeFiles": "/malloy-config.json,/imdb.malloy,/transform.malloy,/data/imdb.duckdb"
-    }
-  }
-}

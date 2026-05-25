@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "malloy": {
-      "command": "/home/lloydtabb/bin/malloy-cli",
-      "args": ["-p",".", "mcp"]
-    }
-  }
-}
