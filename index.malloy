@@ -1,24 +1,24 @@
 ##! experimental.virtual_source experimental.persistence experimental.join_types
 
 
-source: people is duckdb.table('imdb_names') extend {
+source: people is duckdb.table('mayolo.imdb_names') extend {
   // cast, crew, everyone involved in movies
   primary_key: nconst
 }
 
-source: principals is duckdb.table('imdb_principals') extend {
+source: principals is duckdb.table('mayolo.imdb_principals') extend {
   // a mapping table that links people to movies, along with their job on that movie.
   join_one: people is people on nconst = people.nconst
   measure: principal_count is count()
 }
 
-query: genre_movie_map is duckdb.table('imdb_titles') -> {
+query: genre_movie_map is duckdb.table('mayolo.imdb_titles') -> {
   group_by:
     tconst
     genre is genres.value
 }
 
-source: movies is duckdb.table('imdb_titles') extend {
+source: movies is duckdb.table('mayolo.imdb_titles') extend {
   // all the movies
   join_many: principals on tconst = principals.tconst
   join_many: principals2 is principals on tconst = principals2.tconst
