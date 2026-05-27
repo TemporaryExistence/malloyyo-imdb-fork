@@ -18,6 +18,7 @@ query: genre_movie_map is duckdb.table('https://storage.googleapis.com/malloyyo/
     genre is genres.value
 }
 
+#" IMDB dataset of the the most popular movies in the imdb (by total_votes)"
 source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_titles.parquet') extend {
   // all the movies
   join_many: principals on tconst = principals.tconst
@@ -229,3 +230,5 @@ run: movies -> {
   order_by: total_ratings desc
   limit: 100
 }
+
+export {movies}
