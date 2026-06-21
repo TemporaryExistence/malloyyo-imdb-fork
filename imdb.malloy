@@ -19,6 +19,25 @@ query: genre_movie_map is duckdb.table('https://storage.googleapis.com/malloyyo/
 }
 
 #" IMDB dataset of the the most popular movies in the imdb (by total_votes)"
+#|(agent) 
+   People on a movie are exposed as two flattened pairs so you don't have to
+   walk the principals -> people join:
+     (name,  job)  - a person and the role they played on the movie
+     (name2, job2) - a SECOND, independent person on the same title
+   Group/filter on these directly. Combine the two pairs to relate two people
+   on one movie - e.g. composers who worked with a given director.
+
+   Genres follow the same flattened-pair pattern:
+     genre  - a genre on the movie
+     genre2 - a SECOND, independent genre on the same title
+   Group/filter on these directly. Combine the two to relate two genres on one
+   movie - e.g. how often comedy and romance appear together.
+
+   Possible job / job2 values (most to least common):
+     actor, actress, producer, writer, editor, composer, casting_director,
+     director, cinematographer, production_designer, self, archive_footage,
+     archive_sound
+|#
 source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_titles.parquet') extend {
   // all the movies
   join_many: principals on tconst = principals.tconst

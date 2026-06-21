@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "malloy": {
+      "command": "malloyyo",
+      "args": ["mcp"]
+    }
+  }
+}
