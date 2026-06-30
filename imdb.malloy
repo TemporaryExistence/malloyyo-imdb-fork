@@ -67,6 +67,7 @@ source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_tit
     name is principals.people.primaryName
     name2 is principals2.people.primaryName
 
+  #" Movies with poster, year and vote count
   view: by_title is {
     group_by:
       # image {width="30px" }
@@ -76,6 +77,7 @@ source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_tit
   }
 
   # list
+  #" Grid of movie posters by total ratings
   view: movie_grid is {
     # image{ width="30px"}
     // # href=movie_url
@@ -87,6 +89,7 @@ source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_tit
   }
 
   # bar_chart
+  #" Genres by title count and average year
   view: genre_and_time is {
     group_by: genre is genre2
     aggregate: title_count
@@ -94,31 +97,37 @@ source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_tit
   }
 
   # line_chart
+  #" Titles released per year
   view: by_year is {
     group_by: startYear
     aggregate: title_count
     order_by: startYear desc
   }
 
+  #" People (cast and crew) by ratings and number of titles
   view: by_name is {
     group_by: principals.people.primaryName, principals.nconst
     aggregate: total_ratings, title_count
   }
 
+  #" Title counts by job category (actor, director, composer, …)
   view: by_job_category is {
     group_by: job
     aggregate: title_count
   }
 
   # list
+  #" List of job categories with title counts
   view: job_list is by_job_category
 
   # list
+  #" List of titles by total ratings
   view: title_list is {
     group_by: primaryTitle
     aggregate: total_ratings
   }
 
+  #" Find people that worked together, filter on name (e.g. where: name = 'Tom Hanks')
   view: works_with is {
     group_by: principals2.people.primaryName
     aggregate: title_count, percent_of_titles
@@ -130,11 +139,13 @@ source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_tit
     limit: 10
   }
 
+  #" Genres by title count and ratings
   view: by_genre is {
     group_by: genre is genres.value
     aggregate: title_count, total_ratings, percent_of_titles
   }
 
+  #" Top directors by total ratings
   view: top_directors is {
     limit: 100
     where: job = 'director'
@@ -142,6 +153,7 @@ source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_tit
     aggregate: total_ratings
   }
 
+  #" Top actors and actresses by total ratings
   view: top_actors is {
     limit: 100
     where: job = 'actor' | 'actress'
@@ -150,6 +162,7 @@ source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_tit
   }
 
   # dashboard
+  #" Dashboard of top titles with nested genres and cast
   view: titles_dashboard is {
     group_by:
       movie_image
