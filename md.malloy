@@ -1,0 +1,7 @@
+// tables from MotherDuck (mayolo database) — faster than reading parquet from GCS.
+// Same source names as gs.malloy, so switching storage is a one-line import
+// change in imdb.malloy (import "gs.malloy" <-> import "md.malloy").
+
+source: people_table is md.table('mayolo.imdb_people') extend {}
+source: principals_table is md.table('mayolo.imdb_principals') extend {}
+source: titles_table is md.table('mayolo.imdb_titles') extend {}

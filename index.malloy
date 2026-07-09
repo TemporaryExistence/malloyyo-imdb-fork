@@ -1,2 +1,2 @@
-import {movies} from './imdb.malloy'
-export {movies}
+import {movies, NAME, name_options} from './imdb.malloy'
+export {movies, NAME, name_options}

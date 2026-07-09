@@ -1,0 +1,7 @@
+// tables from Google Cloud Storage.
+// Same source names as md.malloy, so switching storage is a one-line import
+// change in imdb.malloy (import "gs.malloy" <-> import "md.malloy").
+
+source: people_table is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_names.parquet') extend {}
+source: principals_table is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_principals.parquet') extend {}
+source: titles_table is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_titles.parquet') extend {}

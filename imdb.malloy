@@ -1,18 +1,25 @@
-##! experimental.virtual_source experimental.persistence experimental.join_types
+##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens
 
+// storage sources — swap between "gs.malloy" (GCS parquet) and "md.malloy"
+// (MotherDuck, faster). Both define the same source names.
+import "md.malloy"
 
-source: people is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_names.parquet') extend {
+given:
+  # label="Name" suggest{query=name_options dimension=name}
+  NAME :: filter<string> is f'Tom Hanks'
+
+source: people is people_table extend {
   // cast, crew, everyone involved in movies
   primary_key: nconst
 }
 
-source: principals is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_principals.parquet') extend {
+source: principals is principals_table extend {
   // a mapping table that links people to movies, along with their job on that movie.
   join_one: people is people on nconst = people.nconst
   measure: principal_count is count()
 }
 
-query: genre_movie_map is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_titles.parquet') -> {
+query: genre_movie_map is titles_table -> {
   group_by:
     tconst
     genre is genres.value
@@ -38,7 +45,7 @@ query: genre_movie_map is duckdb.table('https://storage.googleapis.com/malloyyo/
      director, cinematographer, production_designer, self, archive_footage,
      archive_sound
 |#
-source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_titles.parquet') extend {
+source: movies is titles_table extend {
   // all the movies
   join_many: principals on tconst = principals.tconst
   join_many: principals2 is principals on tconst = principals2.tconst
@@ -70,22 +77,8 @@ source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_tit
   #" Movies with poster, year and vote count
   view: by_title is {
     group_by:
-      # image {width="30px" }
-      movie_image
       tconst, primaryTitle, startYear, numVotes
-    order_by: 5 desc
-  }
-
-  # list
-  #" Grid of movie posters by total ratings
-  view: movie_grid is {
-    # image{ width="30px"}
-    // # href=movie_url
-    group_by:
-      movie_image
-      # hidden
-      movie_url
-    aggregate: total_ratings
+    order_by: numVotes desc
   }
 
   # bar_chart
@@ -139,6 +132,18 @@ source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_tit
     limit: 10
   }
 
+  # artifact { title='People that worked together' }
+  #" People that worked together, filter on name
+  view: works_together is works_with + {
+    where: name ~ $NAME
+    nest: by_title
+  }
+
+  view: name_suggest is {
+    group_by: name
+    aggregate: total_ratings
+  }
+
   #" Genres by title count and ratings
   view: by_genre is {
     group_by: genre is genres.value
@@ -178,6 +183,11 @@ source: movies is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_tit
     order_by: 2 desc
   }
 }
+
+// Name typeahead options for the NAME given — most popular first
+// (name_suggest orders by total_ratings desc). `dimension=name` lets the
+// runtime refine this server-side as the user types.
+query: name_options is movies -> name_suggest
 
 // example queries
 // so the top people in the movie buisiness

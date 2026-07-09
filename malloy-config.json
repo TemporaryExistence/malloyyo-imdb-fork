@@ -2,6 +2,11 @@
   "connections": {
     "duckdb": {
       "is": "duckdb"
+    },
+    "md": {
+      "is": "duckdb",
+      "motherDuckToken": {"env": "MALLOYYO_TOKEN"},
+      "databasePath": "md:mayolo:"
     }
   }
 }
