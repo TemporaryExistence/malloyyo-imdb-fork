@@ -122,6 +122,7 @@ source: movies is titles_table extend {
 
   #" Find people that worked together, filter on name (e.g. where: name = 'Tom Hanks')
   view: works_with is {
+    where: name != name2
     group_by: principals2.people.primaryName
     aggregate: title_count, percent_of_titles
     # list
@@ -133,7 +134,7 @@ source: movies is titles_table extend {
   }
 
   # artifact { title='People that worked together' }
-  #" People that worked together, filter on name
+  #" People that worked together, use given $NAME to filter
   view: works_together is works_with + {
     where: name ~ $NAME
     nest: by_title
