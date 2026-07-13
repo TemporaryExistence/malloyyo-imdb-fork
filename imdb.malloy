@@ -25,6 +25,13 @@ query: genre_movie_map is titles_table -> {
     genre is genres.value
 }
 
+query: titles_per_year is titles_table -> {
+  group_by:
+    startYear
+  aggregate: title_count is count(tconst)
+}
+
+
 #" IMDB dataset of the the most popular movies in the imdb (by total_votes)"
 #|(agent) 
    People on a movie are exposed as two flattened pairs so you don't have to
@@ -155,9 +162,51 @@ source: movies is titles_table extend {
   view: top_directors is {
     limit: 100
     where: job = 'director'
-    group_by: name, principals.nconst
+    group_by: 
+      name 
+      principals.nconst
     aggregate: total_ratings
   }
+
+ # dashboard {columns=6} artifact {title='Genre Combinations and Top Titles'}
+  #" Genre combinations with top titles and percent of year's titles
+ view: genre_pairs is {
+    join_one: titles_per_year on startYear = titles_per_year.startYear
+    where: genre != genre2
+      and genre < genre2
+    # colspan=3
+    group_by: `Genre Combination` is concat(genre,'/', genre2)
+    # hidden
+    aggregate: total_ratings
+    # colspan=3
+    //# list
+    nest: `Top Titles Overall` is {
+      group_by: primaryTitle, `Year` is startYear
+      # hidden
+      aggregate: total_ratings
+      limit: 10
+    }
+
+    # colspan=3
+    # line_chart{ y.independent}
+    nest: `By Year as a Percent of Year's Titles (hover for detail)` is {
+      group_by: 
+        # label="Year"
+        startYear
+      aggregate:
+        # percent
+        `Percent of titles in Year` is title_count / max(titles_per_year.title_count)
+      order_by: startYear
+      # tooltip
+      nest: titles is {
+        group_by: primaryTitle
+        aggregate: total_ratings
+        limit: 5
+      }
+    }
+    limit: 100
+  }
+
 
   #" Top actors and actresses by total ratings
   view: top_actors is {

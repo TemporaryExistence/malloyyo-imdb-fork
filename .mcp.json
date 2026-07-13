@@ -1,8 +1,11 @@
 {
   "mcpServers": {
-    "malloy": {
+    "malloyyo_author": {
       "command": "malloyyo",
-      "args": ["mcp"]
+      "args": [
+        "mcp",
+        "--develop"
+      ]
     }
   }
 }
