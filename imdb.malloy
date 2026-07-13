@@ -8,6 +8,12 @@ given:
   # label="Name" suggest{query=name_options dimension=name}
   NAME :: filter<string> is f'Tom Hanks'
 
+  # label="Movie Title"  suggest{source=movies dimension=primaryTitle}
+  TITLE :: filter<string> is f''
+
+  # label="Genre"  suggest{source=movies dimension=genre}
+  GENRE :: filter<string> is f''
+
 source: people is people_table extend {
   // cast, crew, everyone involved in movies
   primary_key: nconst
@@ -63,7 +69,7 @@ source: movies is titles_table extend {
   measure:
     title_count is count(tconst)
     row_count is count()
-    # format="#,###""
+    # format="#,###"
     total_ratings is sum(numVotes / 1000.0)
     average_rating is averageRating.avg()
     # percent
@@ -74,12 +80,24 @@ source: movies is titles_table extend {
     movie_image is concat('https://www.clearplay.com/MovieBattle/images/', tconst, '.jpg')
     # link
     movie_url is concat('https://www.imdb.com/title/', tconst)
+
+    # drill {to=[title_detail]}
+    title is primaryTitle
+
+    # drill {to=[genre_pairs] given=GENRE}
     genre is genres.value
+    # drill {to=[genre_pairs] given=GENRE}
     genre2 is genre_movie_map.genre
     job is principals.category
     job2 is principals2.category
+
+    # drill {to=[works_together] given=NAME}
     name is principals.people.primaryName
+
+    # drill {to=[works_together] given=NAME}
     name2 is principals2.people.primaryName
+
+
 
   #" Movies with poster, year and vote count
   view: by_title is {
@@ -123,14 +141,14 @@ source: movies is titles_table extend {
   # list
   #" List of titles by total ratings
   view: title_list is {
-    group_by: primaryTitle
+    group_by: title
     aggregate: total_ratings
   }
 
   #" Find people that worked together, filter on name (e.g. where: name = 'Tom Hanks')
   view: works_with is {
     where: name != name2
-    group_by: principals2.people.primaryName
+    group_by: name2
     aggregate: title_count, percent_of_titles
     # list
     nest: by_job is {
@@ -144,7 +162,10 @@ source: movies is titles_table extend {
   #" People that worked together, use given $NAME to filter
   view: works_together is works_with + {
     where: name ~ $NAME
-    nest: by_title
+    nest: by_title is {
+      group_by: title
+      aggregate: total_ratings
+    }
   }
 
   view: name_suggest is {
@@ -173,7 +194,8 @@ source: movies is titles_table extend {
  view: genre_pairs is {
     join_one: titles_per_year on startYear = titles_per_year.startYear
     where: genre != genre2
-      and genre < genre2
+      and (genre < genre2 or not '' ~ $GENRE )
+      and genre ~ $GENRE
     # colspan=3
     group_by: `Genre Combination` is concat(genre,'/', genre2)
     # hidden
@@ -181,7 +203,7 @@ source: movies is titles_table extend {
     # colspan=3
     //# list
     nest: `Top Titles Overall` is {
-      group_by: primaryTitle, `Year` is startYear
+      group_by: title, `Year` is startYear
       # hidden
       aggregate: total_ratings
       limit: 10
@@ -199,7 +221,7 @@ source: movies is titles_table extend {
       order_by: startYear
       # tooltip
       nest: titles is {
-        group_by: primaryTitle
+        group_by: title
         aggregate: total_ratings
         limit: 5
       }
@@ -207,6 +229,19 @@ source: movies is titles_table extend {
     limit: 100
   }
 
+
+  # artifact{title="Movie Detail"}
+  view: title_detail is {
+    where: title ~ $TITLE
+    group_by: 
+      title
+      startYear
+      genres
+    nest: `Cast` is {
+      group_by: name, job
+    }
+    limit: 5
+  }
 
   #" Top actors and actresses by total ratings
   view: top_actors is {
@@ -222,7 +257,7 @@ source: movies is titles_table extend {
     group_by:
       movie_image
       production_year is startYear
-      primaryTitle, runtimeMinutes, movie_url
+      title, runtimeMinutes, movie_url
     nest:
       genre_list is by_genre
       by_cast is by_job_category + {
@@ -316,7 +351,7 @@ run: movies -> {
       aggregate: title_count
       order_by: title_count desc
       # list
-      nest: primaryTitle
+      nest: title
       limit: 10
     }
   order_by: total_ratings desc
