@@ -222,7 +222,7 @@ source: movies is titles_table extend {
     aggregate: total_ratings
   }
 
-  # artifact{title="Movie Detail"} dashboard
+  # artifact{title="Movie Detail" givens {NAME="", TITLE=""}} dashboard
   #" Dashboard of most recent titles with nested genres and cast
   view: title_detail is {
     where: title ~ $TITLE and name2 ~$NAME
@@ -234,8 +234,10 @@ source: movies is titles_table extend {
       by_cast is {
         group_by: job
         aggregate: title_count
-        # list
-        nest: names is by_name + { limit: 200 }
+        nest: names is {
+          group_by: name
+          limit: 200 
+        }
       }
     limit: 20
     order_by: release_year desc
