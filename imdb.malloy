@@ -1,8 +1,9 @@
-##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens
+##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
 
 // storage sources — swap between "gs.malloy" (GCS parquet) and "md.malloy"
 // (MotherDuck, faster). Both define the same source names.
 import "md.malloy"
+// import "gs.malloy"
 
 given:
   # label="Name" suggest{query=name_options dimension=name}
@@ -33,7 +34,7 @@ query: genre_movie_map is titles_table -> {
 
 query: titles_per_year is titles_table -> {
   group_by:
-    startYear
+    release_year is startYear
   aggregate: title_count is count(tconst)
 }
 
@@ -67,12 +68,14 @@ source: movies is titles_table extend {
   primary_key: tconst
 
   measure:
+    # label="Title Count"
     title_count is count(tconst)
     row_count is count()
-    # format="#,###"
+    # format="#,###" label="Total Ratings"
     total_ratings is sum(numVotes / 1000.0)
+    # label="Average Rating"
     average_rating is averageRating.avg()
-    # percent
+    # percent label="Percent of Titles"
     percent_of_titles is title_count / all(title_count)
 
   dimension:
@@ -81,7 +84,7 @@ source: movies is titles_table extend {
     # link
     movie_url is concat('https://www.imdb.com/title/', tconst)
 
-    # drill {to=[title_detail]}
+    # drill {to=[title_detail]} label="Title"
     title is primaryTitle
 
     # drill {to=[genre_pairs] given=GENRE}
@@ -91,18 +94,20 @@ source: movies is titles_table extend {
     job is principals.category
     job2 is principals2.category
 
-    # drill {to=[works_together] given=NAME}
+    # drill {to=[works_together, title_detail] given=NAME}
     name is principals.people.primaryName
 
-    # drill {to=[works_together] given=NAME}
+    # drill {to=[works_together, title_detail] given=NAME}
     name2 is principals2.people.primaryName
 
+    # number="####" label="Year"
+    release_year is startYear
 
 
   #" Movies with poster, year and vote count
   view: by_title is {
     group_by:
-      tconst, primaryTitle, startYear, numVotes
+      tconst, title, release_year, numVotes
     order_by: numVotes desc
   }
 
@@ -111,38 +116,21 @@ source: movies is titles_table extend {
   view: genre_and_time is {
     group_by: genre is genre2
     aggregate: title_count
-    aggregate: avg_year is startYear.avg()
+    aggregate: avg_year is release_year.avg()
   }
 
   # line_chart
   #" Titles released per year
   view: by_year is {
-    group_by: startYear
+    group_by: release_year
     aggregate: title_count
-    order_by: startYear desc
+    order_by: release_year desc
   }
 
   #" People (cast and crew) by ratings and number of titles
   view: by_name is {
     group_by: principals.people.primaryName, principals.nconst
     aggregate: total_ratings, title_count
-  }
-
-  #" Title counts by job category (actor, director, composer, …)
-  view: by_job_category is {
-    group_by: job
-    aggregate: title_count
-  }
-
-  # list
-  #" List of job categories with title counts
-  view: job_list is by_job_category
-
-  # list
-  #" List of titles by total ratings
-  view: title_list is {
-    group_by: title
-    aggregate: total_ratings
   }
 
   #" Find people that worked together, filter on name (e.g. where: name = 'Tom Hanks')
@@ -168,11 +156,6 @@ source: movies is titles_table extend {
     }
   }
 
-  view: name_suggest is {
-    group_by: name
-    aggregate: total_ratings
-  }
-
   #" Genres by title count and ratings
   view: by_genre is {
     group_by: genre is genres.value
@@ -192,7 +175,7 @@ source: movies is titles_table extend {
  # dashboard {columns=6} artifact {title='Genre Combinations and Top Titles'}
   #" Genre combinations with top titles and percent of year's titles
  view: genre_pairs is {
-    join_one: titles_per_year on startYear = titles_per_year.startYear
+    join_one: titles_per_year on release_year = titles_per_year.release_year
     where: genre != genre2
       and (genre < genre2 or not '' ~ $GENRE )
       and genre ~ $GENRE
@@ -203,7 +186,10 @@ source: movies is titles_table extend {
     # colspan=3
     //# list
     nest: `Top Titles Overall` is {
-      group_by: title, `Year` is startYear
+      group_by: 
+        title
+        # label='Year' number="####"
+        release_year
       # hidden
       aggregate: total_ratings
       limit: 10
@@ -212,13 +198,12 @@ source: movies is titles_table extend {
     # colspan=3
     # line_chart{ y.independent}
     nest: `By Year as a Percent of Year's Titles (hover for detail)` is {
-      group_by: 
-        # label="Year"
-        startYear
+      group_by:    
+        release_year
       aggregate:
         # percent
         `Percent of titles in Year` is title_count / max(titles_per_year.title_count)
-      order_by: startYear
+      order_by: release_year
       # tooltip
       nest: titles is {
         group_by: title
@@ -229,20 +214,6 @@ source: movies is titles_table extend {
     limit: 100
   }
 
-
-  # artifact{title="Movie Detail"}
-  view: title_detail is {
-    where: title ~ $TITLE
-    group_by: 
-      title
-      startYear
-      genres
-    nest: `Cast` is {
-      group_by: name, job
-    }
-    limit: 5
-  }
-
   #" Top actors and actresses by total ratings
   view: top_actors is {
     limit: 100
@@ -251,109 +222,27 @@ source: movies is titles_table extend {
     aggregate: total_ratings
   }
 
-  # dashboard
-  #" Dashboard of top titles with nested genres and cast
-  view: titles_dashboard is {
+  # artifact{title="Movie Detail"} dashboard
+  #" Dashboard of most recent titles with nested genres and cast
+  view: title_detail is {
+    where: title ~ $TITLE and name2 ~$NAME
     group_by:
-      movie_image
-      production_year is startYear
+      release_year
       title, runtimeMinutes, movie_url
     nest:
       genre_list is by_genre
-      by_cast is by_job_category + {
+      by_cast is {
+        group_by: job
+        aggregate: title_count
         # list
         nest: names is by_name + { limit: 200 }
       }
     limit: 20
-    order_by: 2 desc
+    order_by: release_year desc
   }
 }
 
-// Name typeahead options for the NAME given — most popular first
-// (name_suggest orders by total_ratings desc). `dimension=name` lets the
-// runtime refine this server-side as the user types.
-query: name_options is movies -> name_suggest
-
-// example queries
-// so the top people in the movie buisiness
-run: movies -> by_name
-
-// the people by the number of times they've been in the top 10
-run: people -> {
-  group_by: primaryName
-  aggregate: top10_count is by_year.sum(pick 1 when by_year.year_rank <= 10 else 0)
-}
-
-run: movies -> by_name + {
-  where: job = 'director'
-  nest:
-    by_genre + { limit: 5 order_by: total_ratings desc }
-}
-
-run: movies -> by_title + {
-  join_one: d is movies -> top_actors + { limit: 500 } -> nconst inner on directors.each = d.nconst
-  //where_exists: directors.each in movies->top_actors->nconst
-  nest: director_list is { group_by: director is director.primaryName }
-  limit: 100
-  order_by: numVotes desc
-}
-
-run: movies -> top_actors -> nconst
-
-run: movies -> genre + title_count + {
-  limit: 100
-}
-
-run: principals -> category + principal_count
-
-run: movies -> by_title + {
-  join_one: d is movies -> top_directors + {
-    limit: 50
-  } -> nconst inner on directors.each = d.nconst
-  nest: director_list is { group_by: director is director.primaryName }
-  order_by: startYear desc
-}
-
-run: movies -> by_title + {
-  where: director.primaryName = 'Steven Spielberg'
-}
-
-run: movies -> {
-  where: directors.each = 'nm0000229'
-  group_by:
-    startYear
-    genre is genres.value
-  aggregate: title_count
-  order_by: startYear
-  limit: 10000
-}
-
-run: movies -> {
-  where: director.primaryName = 'Steven Spielberg'
-  group_by:
-    startYear
-    genre is genres.value
-  aggregate: title_count
-  order_by: startYear
-  limit: 10000
-}
-
-run: movies -> {
-  where: job = 'composer'
-  group_by: director is director.primaryName
-  aggregate:
-    total_ratings, title_count
-    actor_count is count(name)
-    actors_per_film is count(name) / title_count
-  nest:
-    composer is {
-      group_by: composer is name
-      aggregate: title_count
-      order_by: title_count desc
-      # list
-      nest: title
-      limit: 10
-    }
-  order_by: total_ratings desc
-  limit: 100
+query: name_options is movies -> {
+  group_by: name 
+  aggregate: total_ratings
 }
