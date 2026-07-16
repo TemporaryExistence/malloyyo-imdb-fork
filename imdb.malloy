@@ -146,16 +146,6 @@ source: movies is titles_table extend {
     limit: 10
   }
 
-  # artifact { title='People that worked together' }
-  #" People that worked together, use given $NAME to filter
-  view: works_together is works_with + {
-    where: name ~ $NAME
-    nest: by_title is {
-      group_by: title
-      aggregate: total_ratings
-    }
-  }
-
   #" Genres by title count and ratings
   view: by_genre is {
     group_by: genre is genres.value
@@ -172,75 +162,12 @@ source: movies is titles_table extend {
     aggregate: total_ratings
   }
 
- # dashboard {columns=6} artifact {title='Genre Combinations and Top Titles'}
-  #" Genre combinations with top titles and percent of year's titles
- view: genre_pairs is {
-    join_one: titles_per_year on release_year = titles_per_year.release_year
-    where: genre != genre2
-      and (genre < genre2 or not '' ~ $GENRE )
-      and genre ~ $GENRE
-    # colspan=3
-    group_by: `Genre Combination` is concat(genre,'/', genre2)
-    # hidden
-    aggregate: total_ratings
-    # colspan=3
-    //# list
-    nest: `Top Titles Overall` is {
-      group_by: 
-        title
-        # label='Year' number="####"
-        release_year
-      # hidden
-      aggregate: total_ratings
-      limit: 10
-    }
-
-    # colspan=3
-    # line_chart{ y.independent}
-    nest: `By Year as a Percent of Year's Titles (hover for detail)` is {
-      group_by:    
-        release_year
-      aggregate:
-        # percent
-        `Percent of titles in Year` is title_count / max(titles_per_year.title_count)
-      order_by: release_year
-      # tooltip
-      nest: titles is {
-        group_by: title
-        aggregate: total_ratings
-        limit: 5
-      }
-    }
-    limit: 100
-  }
-
   #" Top actors and actresses by total ratings
   view: top_actors is {
     limit: 100
     where: job = 'actor' | 'actress'
     group_by: name, principals.nconst
     aggregate: total_ratings
-  }
-
-  # artifact{title="Movie Detail" givens {NAME="", TITLE=""}} dashboard
-  #" Dashboard of most recent titles with nested genres and cast
-  view: title_detail is {
-    where: title ~ $TITLE and name2 ~$NAME
-    group_by:
-      release_year
-      title, runtimeMinutes, movie_url
-    nest:
-      genre_list is by_genre
-      by_cast is {
-        group_by: job
-        aggregate: title_count
-        nest: names is {
-          group_by: name
-          limit: 200 
-        }
-      }
-    limit: 20
-    order_by: release_year desc
   }
 }
 

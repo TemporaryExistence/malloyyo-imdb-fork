@@ -1,0 +1,24 @@
+##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
+import "../imdb.malloy"
+
+# artifact { title="Movie Detail" givens { NAME="" TITLE="" } }
+# dashboard
+#" Dashboard of most recent titles with nested genres and cast
+query: title_detail is movies -> {
+  where: title ~ $TITLE and name2 ~$NAME
+  group_by:
+    release_year
+    title, runtimeMinutes, movie_url
+  nest:
+    genre_list is by_genre
+    by_cast is {
+      group_by: job
+      aggregate: title_count
+      nest: names is {
+        group_by: name
+        limit: 200 
+      }
+    }
+  limit: 20
+  order_by: release_year desc
+}

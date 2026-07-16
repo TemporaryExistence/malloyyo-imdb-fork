@@ -1,0 +1,11 @@
+##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
+import "../imdb.malloy"
+
+# artifact { title="People that worked together" givens {NAME='Tom Hanks'}}
+query: works_together is movies -> works_with + {
+  where: name ~ $NAME
+  nest: by_title is {
+    group_by: title
+    aggregate: total_ratings
+  }
+}

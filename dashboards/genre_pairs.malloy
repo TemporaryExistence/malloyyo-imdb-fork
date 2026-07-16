@@ -1,0 +1,47 @@
+##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
+import "../imdb.malloy"
+
+
+# dashboard {columns=6} 
+# artifact { title="Genre Combinations and Top Titles" givens { NAME=""} }
+#" Genre combinations with top titles and percent of year's titles
+ query: genre_pairs is movies -> {
+    join_one: titles_per_year on release_year = titles_per_year.release_year
+    where: genre != genre2
+      and (genre < genre2 or not '' ~ $GENRE )
+      and genre ~ $GENRE
+      and name ~ $NAME
+    # colspan=3
+    group_by: `Genre Combination` is concat(genre,'/', genre2)
+    # hidden
+    aggregate: total_ratings
+    # colspan=3
+    //# list
+    nest: `Top Titles Overall` is {
+      group_by: 
+        title
+        # label='Year' number="####"
+        release_year
+      # hidden
+      aggregate: total_ratings
+      limit: 10
+    }
+
+    # colspan=3
+    # line_chart{ y.independent}
+    nest: `By Year as a Percent of Year's Titles (hover for detail)` is {
+      group_by:    
+        release_year
+      aggregate:
+        # percent
+        `Percent of titles in Year` is title_count / max(titles_per_year.title_count)
+      order_by: release_year
+      # tooltip
+      nest: titles is {
+        group_by: title
+        aggregate: total_ratings
+        limit: 5
+      }
+    }
+    limit: 100
+  }
