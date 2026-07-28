@@ -1,5 +1,5 @@
 ##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
-import "../imdb.malloy"
+import "../index.malloy"
 
 
 # dashboard {columns=6} 
