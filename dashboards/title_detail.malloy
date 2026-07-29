@@ -7,6 +7,7 @@ import "../index.malloy"
 query: title_detail is movies -> {
   where: title ~ $TITLE and name2 ~$NAME
   group_by:
+    movie_image
     release_year
     title, runtimeMinutes, movie_url
   nest:

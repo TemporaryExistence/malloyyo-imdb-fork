@@ -25,6 +25,12 @@ source: principals is principals_table extend {
   measure: principal_count is count()
 }
 
+source: poster_paths is poster_paths_table extend {
+  // imdb_id -> TMDB poster_path. Rows exist for titles TMDB doesn't have or
+  // has no artwork for, so poster_path is null unless status = 'ok'.
+  primary_key: imdb_id
+}
+
 query: genre_movie_map is titles_table -> {
   group_by:
     tconst
@@ -64,6 +70,7 @@ source: movies is titles_table extend {
   join_many: principals2 is principals on tconst = principals2.tconst
   join_many: genre_movie_map on tconst = genre_movie_map.tconst
   join_many: director is people on directors.each = director.nconst
+  join_one: poster_paths on tconst = poster_paths.imdb_id
   primary_key: tconst
 
   measure:
@@ -78,8 +85,19 @@ source: movies is titles_table extend {
     percent_of_titles is title_count / all(title_count)
 
   dimension:
-    # image {width="150px"}
-    movie_image is concat('https://www.clearplay.com/MovieBattle/images/', tconst, '.jpg')
+    // TMDB serves images with no auth, so the static site hotlinks the CDN.
+    // poster_path already starts with '/' - don't add another. Null when TMDB
+    // has no artwork, which pick keeps null rather than concat'ing a URL that
+    // would 404. Sizes: w92/w154 table rows, w185 card grids, w342+ detail.
+    # image {width="103px" height="154px"} label="Poster"
+    movie_image is pick null when poster_paths.poster_path is null
+      else concat('https://image.tmdb.org/t/p/w154', poster_paths.poster_path)
+
+    // Same poster at the smallest size TMDB offers, for dense table rows -
+    // a 100-row list at w185 is several megabytes.
+    # image {width="46px" height="69px"} label="Poster"
+    movie_thumb is pick null when poster_paths.poster_path is null
+      else concat('https://image.tmdb.org/t/p/w92', poster_paths.poster_path)
     # link
     movie_url is concat('https://www.imdb.com/title/', tconst)
 
@@ -88,7 +106,7 @@ source: movies is titles_table extend {
 
     # drill {to=[genre_pairs] given=GENRE}
     genre is genres.value
-    # drill {to=[genre_pairs] given=GENRE}
+    # drill {to=[genre_pairs] given=GENRE2}
     genre2 is genre_movie_map.genre
     job is principals.category
     job2 is principals2.category

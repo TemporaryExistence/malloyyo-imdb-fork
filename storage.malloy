@@ -11,3 +11,8 @@
 source: people_table is duckdb.table('docs/imdb_names.parquet') extend {}
 source: principals_table is duckdb.table('docs/imdb_principals.parquet') extend {}
 source: titles_table is duckdb.table('docs/imdb_titles.parquet') extend {}
+
+// imdb_id -> TMDB poster_path, resolved at build time by
+// scripts/resolve_posters.py. Only the path is stored; the base URL and the
+// size are presentation decisions, applied in imdb.malloy.
+source: poster_paths_table is duckdb.table('docs/data/poster_paths.parquet') extend {}

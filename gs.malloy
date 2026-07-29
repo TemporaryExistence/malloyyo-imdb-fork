@@ -5,3 +5,5 @@
 source: people_table is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_names.parquet') extend {}
 source: principals_table is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_principals.parquet') extend {}
 source: titles_table is duckdb.table('https://storage.googleapis.com/malloyyo/imdb_titles.parquet') extend {}
+// Upload docs/data/poster_paths.parquet here before switching to this storage.
+source: poster_paths_table is duckdb.table('https://storage.googleapis.com/malloyyo/poster_paths.parquet') extend {}

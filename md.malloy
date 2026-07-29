@@ -5,3 +5,5 @@
 source: people_table is md.table('mayolo.imdb_people') extend {}
 source: principals_table is md.table('mayolo.imdb_principals') extend {}
 source: titles_table is md.table('mayolo.imdb_titles') extend {}
+// Load docs/data/poster_paths.parquet into mayolo before switching to this storage.
+source: poster_paths_table is md.table('mayolo.poster_paths') extend {}

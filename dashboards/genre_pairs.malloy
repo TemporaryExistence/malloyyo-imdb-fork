@@ -1,47 +1,79 @@
 ##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
 import "../index.malloy"
 
+// Two genres and (optionally) one year. GENRE / GENRE2 are the two halves of the
+// combination; the model's `genre` and `genre2` dimensions are independent joins
+// onto the same title, so filtering both finds films carrying BOTH labels.
+//
+// YEAR is a filter<number> whose EMPTY value means "All Time" — there is no
+// separate all-time flag, an empty filter simply matches every row. The stepper
+// in genre_pairs.jsx moves it one year at a time.
+given:
+  # label="Second Genre" suggest{source=movies dimension=genre}
+  GENRE2 :: filter<string> is f'Romance'
 
-# dashboard {columns=6} 
-# artifact { title="Genre Combinations and Top Titles" givens { NAME=""} }
-#" Genre combinations with top titles and percent of year's titles
- query: genre_pairs is movies -> {
-    join_one: titles_per_year on release_year = titles_per_year.release_year
-    where: genre != genre2
-      and (genre < genre2 or not '' ~ $GENRE )
-      and genre ~ $GENRE
-      and name ~ $NAME
-    # colspan=3
-    group_by: `Genre Combination` is concat(genre,'/', genre2)
-    # hidden
-    aggregate: total_ratings
-    # colspan=3
-    //# list
-    nest: `Top Titles Overall` is {
-      group_by: 
-        title
-        # label='Year' number="####"
-        release_year
-      # hidden
-      aggregate: total_ratings
-      limit: 10
-    }
+  # label="Year"
+  RELEASE_YEAR :: filter<number> is f''
 
-    # colspan=3
-    # line_chart{ y.independent}
-    nest: `By Year as a Percent of Year's Titles (hover for detail)` is {
-      group_by:    
-        release_year
-      aggregate:
-        # percent
-        `Percent of titles in Year` is title_count / max(titles_per_year.title_count)
-      order_by: release_year
-      # tooltip
-      nest: titles is {
-        group_by: title
-        aggregate: total_ratings
-        limit: 5
-      }
-    }
-    limit: 100
+// Headline numbers for the chosen genre, across all years or just one.
+# artifact { title="Genre Combinations" givens { GENRE="Comedy" RELEASE_YEAR="" } }
+# dashboard
+#" Pick a genre and see its strongest pairings, shelf by shelf
+query: genre_pairs is movies -> {
+  where: genre ~ $GENRE and release_year ~ $RELEASE_YEAR
+  aggregate:
+    title_count
+    total_ratings
+    # label="Average Rating"
+    average_rating
+}
+
+// Every genre with how many films carry it — feeds the genre picker. Genres
+// under 100 films are dropped: they make for a long picker and one-tile shelves.
+query: genre_options is movies -> {
+  group_by: genre is genres.value
+  aggregate: title_count
+  having: title_count >= 100
+  order_by: title_count desc
+}
+
+// One shelf per subgenre: every other genre GENRE pairs with, each nesting its
+// seven most-voted films. Grouping the nest by tconst collapses the
+// principal/genre join fan-out, and total_votes uses max() rather than sum() so
+// it stays the title's own vote count. Shelves are ordered by total_ratings, a
+// symmetric aggregate that survives the fan-out.
+query: genre_shelves is movies -> {
+  where: genre ~ $GENRE and genre != genre2 and release_year ~ $RELEASE_YEAR
+  group_by: subgenre is genre2
+  aggregate:
+    title_count
+    total_ratings
+  nest: titles is {
+    group_by:
+      tconst
+      title
+      release_year
+      movie_image
+      movie_url
+    aggregate:
+      # label="Votes"
+      total_votes is numVotes.max()
+      average_rating
+    order_by: total_votes desc
+    // Six rows' worth. The shelf shows seven at a time and reveals the rest on
+    // demand, so this is the ceiling on "Show more", not what renders up front.
+    limit: 42
   }
+  order_by: total_ratings desc
+  limit: 24
+}
+
+// Which years the chosen genre actually has films in — the stepper uses this to
+// know its bounds and to skip over empty years instead of landing on a blank
+// screen. Ignores RELEASE_YEAR on purpose: it describes the whole timeline.
+query: genre_pair_years is movies -> {
+  where: genre ~ $GENRE
+  group_by: release_year
+  aggregate: title_count
+  order_by: release_year
+}
