@@ -68,12 +68,17 @@ query: genre_shelves is movies -> {
   limit: 24
 }
 
-// Which years the chosen genre actually has films in — the stepper uses this to
-// know its bounds and to skip over empty years instead of landing on a blank
-// screen. Ignores RELEASE_YEAR on purpose: it describes the whole timeline.
-query: genre_pair_years is movies -> {
+// The timeline: the chosen genre's films bucketed into 5-year periods, which the
+// bar picker renders and clicks through to a RELEASE_YEAR range. `period` is the
+// first year of the bucket, so 1994 lands in 1990 and the label reads 1990–94.
+//
+// Ignores RELEASE_YEAR on purpose — the whole timeline has to stay visible while
+// one period is selected, otherwise selecting a bar would erase every other bar.
+query: genre_periods is movies -> {
   where: genre ~ $GENRE
-  group_by: release_year
-  aggregate: title_count
-  order_by: release_year
+  group_by: period is floor(release_year / 5) * 5
+  aggregate:
+    title_count
+    total_ratings
+  order_by: period
 }

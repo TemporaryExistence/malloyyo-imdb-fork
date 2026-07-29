@@ -62,13 +62,6 @@ const unwrap = (src) => {
   return String(src).replace(/^'|'$/g, "");
 };
 
-const Chevron = ({ dir, size = 16, color }) => (
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ display: "block" }}>
-    <path d={dir === "left" ? "M10 3.5 5.5 8 10 12.5" : "M6 3.5 10.5 8 6 12.5"}
-          stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
 /* -------------------------------- genre picker ------------------------- */
 // Every genre, always visible. The selected one is filled; the rest are
 // outlined and obviously tappable.
@@ -109,58 +102,146 @@ function GenrePicker({ ink, options, current, onPick }) {
   );
 }
 
-/* --------------------------------- year rail --------------------------- */
-// "All Time" pinned at the left, then step-back / year / step-forward. Stepping
-// walks the years this genre ACTUALLY has films in, so you never land on an
-// empty screen; from All Time, stepping enters at the newest year.
-function YearRail({ ink, years, value, onChange }) {
-  const idx = value == null ? -1 : years.indexOf(value);
-  const canPrev = years.length > 0 && (idx === -1 || idx > 0);
-  const canNext = idx !== -1 && idx < years.length - 1;
-  const step = (delta) => {
-    if (!years.length) return;
-    if (idx === -1) { onChange(years[years.length - 1]); return; }
-    const next = idx + delta;
-    if (next >= 0 && next < years.length) onChange(years[next]);
+/* -------------------------------- timeline ----------------------------- */
+// The timeline is the picker: one bar per 5-year period, height by film count.
+// Clicking a bar scopes everything below to that period; clicking the selected
+// bar again clears it. "All Time" is the explicit reset.
+//
+// Bars are <button>s rather than a chart library so each one is a real click
+// target with its own label and pressed state.
+const periodLabel = (p) => `${p}–${String(p + 4).slice(-2)}`;
+
+// Click one bar for a single 5-year period, or drag across bars for a longer
+// span. Pointer position is mapped to a bar index off the strip's own rect
+// rather than per-bar enter/leave handlers, so a fast drag can't skip a bar.
+function Timeline({ ink, periods, range, onSelect }) {
+  const stripRef = React.useRef(null);
+  const [drag, setDrag] = React.useState(null); // {anchor, cur} indices, while dragging
+  const [moved, setMoved] = React.useState(false);
+
+  const max = periods.reduce((m, p) => Math.max(m, p.count), 0);
+  const idxOf = (period) => periods.findIndex((p) => p.period === period);
+
+  const indexAt = (clientX) => {
+    const el = stripRef.current;
+    if (!el || !periods.length) return 0;
+    const r = el.getBoundingClientRect();
+    const i = Math.floor(((clientX - r.left) / r.width) * periods.length);
+    return Math.max(0, Math.min(periods.length - 1, i));
   };
-  const allTime = value == null;
-  const btn = (enabled) => ({
-    width: 40, height: 40, flex: "none", display: "grid", placeItems: "center",
-    borderRadius: 10, cursor: enabled ? "pointer" : "default",
-    border: "1px solid var(--dash-border)", background: ink.surface,
-    opacity: enabled ? 1 : 0.35,
-  });
+
+  const onDown = (e) => {
+    const i = indexAt(e.clientX);
+    setDrag({ anchor: i, cur: i });
+    setMoved(false);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+  };
+  const onMove = (e) => {
+    if (!drag) return;
+    const i = indexAt(e.clientX);
+    if (i !== drag.cur) { setDrag((d) => ({ ...d, cur: i })); setMoved(true); }
+  };
+  const onUp = () => {
+    if (!drag) return;
+    const lo = Math.min(drag.anchor, drag.cur);
+    const hi = Math.max(drag.anchor, drag.cur);
+    const single = lo === hi && !moved;
+    // Tapping the bar that is already the whole selection clears it.
+    const isCurrent = range && range.lo === periods[lo]?.period && range.hi === periods[hi]?.period;
+    setDrag(null);
+    setMoved(false);
+    if (single && isCurrent) onSelect(null);
+    else onSelect(periods[lo].period, periods[hi].period);
+  };
+
+  // While dragging, preview the drag; otherwise reflect the committed range.
+  const sel = drag
+    ? { lo: Math.min(drag.anchor, drag.cur), hi: Math.max(drag.anchor, drag.cur) }
+    : range
+      ? { lo: idxOf(range.lo), hi: idxOf(range.hi) }
+      : null;
+  const allTime = !sel || sel.lo < 0;
+
+  const label = allTime
+    ? "every year"
+    : sel.lo === sel.hi
+      ? `showing ${periodLabel(periods[sel.lo].period)}`
+      : `showing ${periods[sel.lo].period}–${periods[sel.hi].period + 4}`;
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 22px" }}>
-      <button
-        type="button"
-        onClick={() => onChange(null)}
-        aria-pressed={allTime}
+    <div style={{ margin: "0 0 26px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+        <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: ink.muted, fontWeight: 700 }}>
+          Timeline
+        </div>
+        <button
+          type="button"
+          onClick={() => onSelect(null)}
+          aria-pressed={allTime}
+          style={{
+            font: "inherit", fontSize: 12, fontWeight: 620, cursor: "pointer",
+            padding: "3px 9px", borderRadius: 7,
+            border: `1px solid ${allTime ? ink.accent : "var(--dash-border)"}`,
+            background: allTime ? ink.accent : ink.surface,
+            color: allTime ? "#fff" : ink.text2,
+          }}
+        >
+          All Time
+        </button>
+        <span style={{ fontSize: 12, color: ink.muted, fontVariantNumeric: "tabular-nums" }}>{label}</span>
+        <span style={{ fontSize: 11.5, color: ink.muted, marginLeft: "auto" }}>
+          click a bar, or drag across several
+        </span>
+      </div>
+
+      <div
+        ref={stripRef}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={() => { setDrag(null); setMoved(false); }}
         style={{
-          font: "inherit", fontSize: 13, fontWeight: 620, cursor: "pointer",
-          height: 40, padding: "0 14px", flex: "none", borderRadius: 10,
-          border: `1.5px solid ${allTime ? ink.accent : "var(--dash-border)"}`,
-          background: allTime ? ink.accent : ink.surface,
-          color: allTime ? "#fff" : ink.text2,
+          display: "flex", alignItems: "flex-end", gap: 3, height: 78,
+          cursor: "col-resize", touchAction: "none", userSelect: "none",
         }}
       >
-        All Time
-      </button>
-      <button type="button" onClick={() => step(-1)} disabled={!canPrev} aria-label="Previous year" style={btn(canPrev)}>
-        <Chevron dir="left" color={ink.text2} />
-      </button>
-      <div style={{
-        width: 132, height: 40, flex: "none", display: "grid", placeItems: "center",
-        borderRadius: 10, border: "1px solid var(--dash-border)", background: ink.surface,
-        fontSize: 16, fontWeight: 680, fontVariantNumeric: "tabular-nums",
-        color: allTime ? ink.muted : ink.text,
-      }}>
-        {allTime ? "1915 – 2025" : value}
+        {periods.map((p, i) => {
+          const on = sel && i >= sel.lo && i <= sel.hi;
+          const h = max > 0 ? Math.max((p.count / max) * 58, 3) : 3;
+          const edge = on && (i === sel.lo || i === sel.hi);
+          return (
+            <div
+              key={p.period}
+              title={`${periodLabel(p.period)} · ${p.count.toLocaleString()} films`}
+              style={{
+                flex: "1 1 0", minWidth: 0, height: "100%",
+                display: "flex", flexDirection: "column", justifyContent: "flex-end", gap: 4,
+              }}
+            >
+              <div style={{
+                height: h, flex: "none",
+                borderRadius: "3px 3px 0 0",
+                background: on ? ink.accent : ink.track,
+                border: `1px solid ${on ? ink.accent : ink.track}`,
+                transition: drag ? "none" : "background .12s ease, height .18s ease",
+              }} />
+              {/* Fixed height and flex:none on EVERY column, labelled or not:
+                  the column is bottom-aligned, so a label that only some bars
+                  have would lift those bars off the shared baseline. */}
+              <div style={{
+                height: 10, flex: "none",
+                fontSize: 9, lineHeight: "10px", textAlign: "center",
+                color: edge ? ink.accent : ink.muted,
+                fontWeight: edge ? 700 : 500,
+                fontVariantNumeric: "tabular-nums",
+                whiteSpace: "nowrap", overflow: "hidden",
+              }}>
+                {edge || p.period % 20 === 0 ? p.period : ""}
+              </div>
+            </div>
+          );
+        })}
       </div>
-      <button type="button" onClick={() => step(1)} disabled={!canNext} aria-label="Next year" style={btn(canNext)}>
-        <Chevron dir="right" color={ink.text2} />
-      </button>
     </div>
   );
 }
@@ -211,7 +292,19 @@ function Tile({ ink, row }) {
   );
 }
 
+const PER_ROW = 7;
+
 function Shelf({ ink, genre, shelf }) {
+  // Rows revealed so far. Resets when the shelf's contents change (new genre or
+  // period) so a deep-expanded shelf doesn't stay expanded into the next view.
+  const [rows, setRows] = React.useState(1);
+  const key = shelf.subgenre + ":" + shelf.titles.length;
+  const lastKey = React.useRef(key);
+  if (lastKey.current !== key) { lastKey.current = key; if (rows !== 1) setRows(1); }
+
+  const visible = shelf.titles.slice(0, rows * PER_ROW);
+  const remaining = shelf.titles.length - visible.length;
+
   return (
     <section style={{ margin: "0 0 26px" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 9, marginBottom: 10 }}>
@@ -222,12 +315,30 @@ function Shelf({ ink, genre, shelf }) {
           {compact(shelf.title_count)} films
         </span>
       </div>
+
+      {/* Fixed 7-up so "another row" means another row; scrolls if the column
+          is too narrow to hold seven tiles. */}
       <div style={{
-        display: "flex", gap: 14, overflowX: "auto", paddingBottom: 4,
-        scrollbarWidth: "thin",
+        display: "grid", gap: 14,
+        gridTemplateColumns: `repeat(${PER_ROW}, ${TILE_W}px)`,
+        overflowX: "auto", paddingBottom: 4,
       }}>
-        {shelf.titles.map((t, i) => <Tile key={t.tconst || i} ink={ink} row={t} />)}
+        {visible.map((t, i) => <Tile key={t.tconst || i} ink={ink} row={t} />)}
       </div>
+
+      {remaining > 0 && (
+        <button
+          type="button"
+          onClick={() => setRows((r) => r + 1)}
+          style={{
+            font: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer",
+            marginTop: 10, padding: "5px 11px", borderRadius: 7,
+            border: "1px solid var(--dash-border)", background: ink.surface, color: ink.text2,
+          }}
+        >
+          Show {Math.min(remaining, PER_ROW)} more
+        </button>
+      )}
     </section>
   );
 }
@@ -239,23 +350,33 @@ export default function Dashboard({ dashboard, givens }) {
   const gYear = useGiven("RELEASE_YEAR");
 
   const genre = unwrap(gGenre.value);
-  const year = React.useMemo(() => {
-    const n = parseInt(unwrap(gYear.value), 10);
-    return Number.isFinite(n) ? n : null;
+
+  // RELEASE_YEAR holds an inclusive year range ('[1990 to 2004]'). Read it back
+  // as the first and last PERIOD it covers: the range's end is the LAST year of
+  // its bucket, so that bucket starts 4 years earlier.
+  const range = React.useMemo(() => {
+    const src = String(gYear.value || "");
+    if (!src) return null;
+    const r = filters.numberRange(src);
+    if (!r) return null;
+    return { lo: r.lo, hi: Math.max(r.lo, r.hi - 4) };
   }, [gYear.value]);
 
   const options = useQuery({ query: "genre_options", givens });
   const shelvesQ = useQuery({ query: "genre_shelves", givens });
-  const yearsQ = useQuery({ query: "genre_pair_years", givens });
+  const periodsQ = useQuery({ query: "genre_periods", givens });
 
   const genreOptions = React.useMemo(
     () => (options.rows || []).map((r) => ({ genre: r.genre, count: num(r.title_count) })).filter((o) => o.genre),
     [options.rows]
   );
 
-  const years = React.useMemo(
-    () => (yearsQ.rows || []).map((r) => num(r.release_year)).filter((y) => y > 0).sort((x, y) => x - y),
-    [yearsQ.rows]
+  const periods = React.useMemo(
+    () => (periodsQ.rows || [])
+      .map((r) => ({ period: num(r.period), count: num(r.title_count) }))
+      .filter((p) => p.period > 0)
+      .sort((a, b) => a.period - b.period),
+    [periodsQ.rows]
   );
 
   // Nested queries come back with the nest as a real JS array on each row.
@@ -299,7 +420,12 @@ export default function Dashboard({ dashboard, givens }) {
         onPick={(g) => gGenre.set(filters.oneOf(g))}
       />
 
-      <YearRail ink={ink} years={years} value={year} onChange={(y) => gYear.set(y == null ? "" : String(y))} />
+      <Timeline
+        ink={ink}
+        periods={periods}
+        range={range}
+        onSelect={(lo, hi) => gYear.set(lo == null ? "" : filters.between(lo, (hi ?? lo) + 4))}
+      />
 
       <div style={{ opacity: stale ? 0.45 : 1, transition: "opacity .15s ease" }}>
         {shelvesQ.error ? (
@@ -308,7 +434,8 @@ export default function Dashboard({ dashboard, givens }) {
           <div style={{ color: ink.muted, fontSize: 13, padding: "40px 0", textAlign: "center" }}>Loading&hellip;</div>
         ) : shown.length === 0 ? (
           <div style={{ color: ink.muted, fontSize: 13.5, padding: "40px 0", textAlign: "center" }}>
-            No pairings for {genre || "this genre"}{year != null ? ` in ${year}` : ""}.
+            No pairings for {genre || "this genre"}
+            {range ? ` in ${range.lo}–${range.hi + 4}` : ""}.
           </div>
         ) : (
           shown.map((s) => <Shelf key={s.subgenre} ink={ink} genre={genre} shelf={s} />)

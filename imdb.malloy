@@ -101,7 +101,7 @@ source: movies is titles_table extend {
     # link
     movie_url is concat('https://www.imdb.com/title/', tconst)
 
-    # drill {to=[title_detail]} label="Title"
+    # label="Title"
     title is primaryTitle
 
     # drill {to=[genre_pairs] given=GENRE}
@@ -111,10 +111,10 @@ source: movies is titles_table extend {
     job is principals.category
     job2 is principals2.category
 
-    # drill {to=[works_together, title_detail] given=NAME}
+    # drill {to=[works_together] given=NAME}
     name is principals.people.primaryName
 
-    # drill {to=[works_together, title_detail] given=NAME}
+    # drill {to=[works_together] given=NAME}
     name2 is principals2.people.primaryName
 
     # number="####" label="Year"

@@ -7,3 +7,6 @@ MANIFESTS
 
 # TMDB read access token for scripts/resolve_posters.py — never commit
 .env.local
+
+# local Claude Code config (machine-specific paths)
+.claude/
