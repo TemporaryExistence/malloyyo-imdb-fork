@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Genre Combinations and Top Titles · malloyyo-imdb</title>
+<title>Genre Combinations · malloyyo-imdb</title>
 <link rel="stylesheet" href="./assets/site.css">
 </head>
 <body>
-<nav class="dash-nav"><a class="brand" href="./" title="Home" aria-label="Home"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 10.2 12 3.5l9 6.7"/><path d="M5.2 8.9V20h13.6V8.9"/><path d="M9.6 20v-6.2h4.8V20"/></svg></a><span class="sep"></span><a href="./genre_pairs.html" class="on">Genre Combinations and Top Titles</a><a href="./title_detail.html">Movie Detail</a><a href="./works_together.html">People that worked together</a></nav>
+<nav class="dash-nav"><a class="brand" href="./" title="Home" aria-label="Home"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 10.2 12 3.5l9 6.7"/><path d="M5.2 8.9V20h13.6V8.9"/><path d="M9.6 20v-6.2h4.8V20"/></svg></a><span class="sep"></span><a href="./genre_pairs.html" class="on">Genre Combinations</a><a href="./title_detail.html">Movie Detail</a><a href="./works_together.html">People that worked together</a></nav>
 <div id="root"></div>
 <script>
-window.__DASHBOARD__ = {"name":"genre_pairs","query":"genre_pairs","title":"Genre Combinations and Top Titles","description":"Genre combinations with top titles and percent of year's titles","entryFile":"dashboards/genre_pairs.malloy","givens":{"NAME":""}};
+window.__DASHBOARD__ = {"name":"genre_pairs","query":"genre_pairs","title":"Genre Combinations","description":"Pick a genre and see its strongest pairings, shelf by shelf","entryFile":"dashboards/genre_pairs.malloy","givens":{"GENRE":"Comedy","RELEASE_YEAR":""}};
 // Given SPECS (label/type/default/suggest) are introspected from the model's
 // given: declarations at BUILD time — the runtime reads them from here to draw
 // controls and seed initial values. Without them there are no controls and
 // every given starts empty.
-window.__GIVENS__ = [{"name":"NAME","type":"filter<string>","filterType":"string","default":"Tom Hanks","tags":{"label":"Name"},"suggest":{"dimension":"name","query":"name_options"}},{"name":"GENRE","type":"filter<string>","filterType":"string","default":"","tags":{"label":"Genre"},"suggest":{"source":"movies","dimension":"genre"}}];
+window.__GIVENS__ = [{"name":"GENRE","type":"filter<string>","filterType":"string","default":"","tags":{"label":"Genre"},"suggest":{"source":"movies","dimension":"genre"}},{"name":"RELEASE_YEAR","type":"filter<number>","filterType":"number","default":"","tags":{"label":"Year"}}];
 // __INITIAL_GIVENS__ is NOT set here on purpose: the entry bundle sets it from
 // location.search using shared/givens-url, the same encoder the dev server uses.
 // An inline copy is what drifted last time (it stripped the dollar-sign prefix
