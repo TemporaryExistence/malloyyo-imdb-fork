@@ -1,5 +1,4 @@
 data/*.gz
-data/*.parquet
 data/*.duckdb
 package-lock.json
 node_modules/*

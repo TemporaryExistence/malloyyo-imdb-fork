@@ -1,9 +1,8 @@
 ##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
 
-// storage sources — swap between "gs.malloy" (GCS parquet) and "md.malloy"
-// (MotherDuck, faster). Both define the same source names.
-import "md.malloy"
-// import "gs.malloy"
+// storage sources — data/ in this repo, via project-relative paths.
+// gs.malloy (GCS) and md.malloy (MotherDuck) define the same source names.
+import "storage.malloy"
 
 given:
   # label="Name" suggest{query=name_options dimension=name}

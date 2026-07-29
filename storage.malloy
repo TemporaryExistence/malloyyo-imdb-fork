@@ -1,0 +1,13 @@
+// Data lives in docs/ — the directory that gets published — referenced by a
+// path relative to the PROJECT ROOT. One spelling works everywhere:
+//
+//   VSCode / malloyyo dashboard dev   DuckDB reads docs/*.parquet off disk
+//   malloyyo dashboard bundle         the site IS docs/, so the page fetches
+//                                     ./imdb_titles.parquet and registers it
+//                                     under this same name
+//
+// Keeping the files in docs/ rather than a separate data/ means they live in
+// git once instead of twice, since docs/ is committed for GitHub Pages.
+source: people_table is duckdb.table('docs/imdb_names.parquet') extend {}
+source: principals_table is duckdb.table('docs/imdb_principals.parquet') extend {}
+source: titles_table is duckdb.table('docs/imdb_titles.parquet') extend {}
