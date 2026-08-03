@@ -1,6 +1,6 @@
 ##! experimental.persistence  experimental.virtual_source
 
-source: raw_titles is imdb.sql(""" 
+source: raw_titles is build.sql(""" 
 		SELECT * FROM
 		read_csv_auto(
 			-- 'https://datasets.imdbws.com/title.basics.tsv.gz'
@@ -8,7 +8,7 @@ source: raw_titles is imdb.sql("""
 			, all_varchar=true, delim='\t', quote='',header=True)
 	""")
 
-source: raw_principals is imdb.sql(""" 
+source: raw_principals is build.sql(""" 
 		SELECT * FROM
 		read_csv_auto(
 			-- 'https://datasets.imdbws.com/title.principals.tsv.gz'
@@ -16,7 +16,7 @@ source: raw_principals is imdb.sql("""
 			, all_varchar=true, delim='\t', quote='',header=True)
 	""")
 
-source: raw_ratings is imdb.sql(""" 
+source: raw_ratings is build.sql(""" 
 		SELECT * FROM
 		read_csv_auto(
 			-- 'https://datasets.imdbws.com/title.ratings.tsv.gz'
@@ -24,14 +24,14 @@ source: raw_ratings is imdb.sql("""
 			, all_varchar=true, delim='\t', quote='',header=True)
 	""")
 
-source: raw_crew is imdb.sql(""" 
+source: raw_crew is build.sql(""" 
 		SELECT * FROM
 		read_csv_auto(
 			-- 'https://datasets.imdbws.com/title.crew.tsv.gz'
 			'data/title.crew.tsv.gz'
 			, all_varchar=true, delim='\t', quote='',header=True)
 	""")
-source: raw_names is imdb.sql(""" 
+source: raw_names is build.sql(""" 
 		SELECT * FROM
 		read_csv_auto(
 			-- 'https://datasets.imdbws.com/name.basics.tsv.gz'

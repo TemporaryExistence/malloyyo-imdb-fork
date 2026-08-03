@@ -1,0 +1,8 @@
+{
+  "connections": {
+    "build": {
+      "is": "duckdb",
+      "databasePath": "data/build.duckdb"
+    }
+  }
+}
