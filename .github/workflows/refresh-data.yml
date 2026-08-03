@@ -49,7 +49,13 @@ jobs:
       # Resolve imdb_id -> TMDB poster_path against the freshly built titles.
       # Reads the previous docs/data/poster_paths.parquet (from the checkout)
       # as a cache, so only new/unresolved titles hit the TMDB API.
+      #
+      # Best-effort: posters are secondary to the data. If the TMDB secret is
+      # missing or the API is down, don't discard the whole data refresh --
+      # continue-on-error lets the commit step still ship the new parquet.
+      # Needs the TMDB_READ_ACCESS_TOKEN repo secret to actually update posters.
       - name: Resolve poster paths
+        continue-on-error: true
         env:
           TMDB_READ_ACCESS_TOKEN: ${{ secrets.TMDB_READ_ACCESS_TOKEN }}
         run: python3 scripts/resolve_posters.py
