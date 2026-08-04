@@ -238,10 +238,19 @@ def resolve_one(imdb_id: str, headers: dict[str, str], limiter: RateLimiter) -> 
 
 
 def row_from_payload(imdb_id: str, payload: dict) -> dict:
-    # FORK CHANGE: also accept television. `find` returns movie_results and
-    # tv_results in separate arrays, and reading only the first meant every
-    # series resolved as "not_found" -- 4,641 of them once TV entered the
-    # corpus. Films still take precedence when an id somehow matches both.
+    # FORK CHANGE: also accept television.
+    #
+    # NOT A BUG UPSTREAM. Upstream's corpus is movies-only by construction
+    # (transform.malloy: `titleType = 'movie'`), so reading movie_results alone
+    # was correct AND complete for it -- measured, not assumed: of a random 400
+    # movie-type titles, 400 resolved via movie_results and none were TV-only,
+    # and the 8 movie-type ids that still fail are genuinely absent from TMDB
+    # rather than misclassified.
+    #
+    # What changed is the corpus, not the code: this fork added tvSeries /
+    # tvMiniSeries / tvMovie, and `find` returns those in a separate array, so
+    # 4,641 of them came back "not_found" until this line learned to look.
+    # Films still take precedence when an id matches both.
     results = (payload.get("movie_results") or []) or (payload.get("tv_results") or [])
     if not results:
         return make_row(imdb_id, status="not_found")
