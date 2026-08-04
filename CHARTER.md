@@ -172,8 +172,19 @@ by dependency first, then by value to the goal in §1:
    **This is the first point at which a visitor can leave with a list** — the charter's actual goal.
 5. **Swipe mode (F5), titles then people.** The retention instrument, and the signed signal the grid lacks.
 6. **Search (F6).** The escape hatch. Cheap once the rate controls from 4 and 5 exist.
-7. **People-tool integration (F4).** Reuses everything above; no new data.
-8. **Import (§4.2).** The power-user path. Last on purpose.
+7. **People-tool integration (F4).** ⚑ **HALF DELIVERED, half deliberately cut.**
+   - *Delivered:* seeding the recommender from a person. Search covers people; picking one surfaces their
+     titles to rate. It does NOT mark their filmography as liked, and says so on screen.
+   - *Cut, with reason:* the provider mark on `works_together`. That dashboard has **no custom
+     component** — Lloyd renders it with Malloy's built-in table renderer. Adding marks means replacing
+     his page with a bespoke React component, which is a **redesign of his work**, and §5's style ruling
+     forbids exactly that. The mark is on every poster surface that has one (`genre_pairs`,
+     `next_watch`); it is absent from the one page that has no posters. Revisit only if Lloyd wants it.
+8. **Import (§4.2).** ⚑ **CUT for now**, as the build order explicitly permits. Andrew has no ratings
+   export anywhere, which is the evidence that demoted it from headline to power-user path in the first
+   place (§4). The three input modes that ship — grid, swipe, search-including-people — cover a visitor
+   who has nothing, which is the charter's actual cold-start requirement. Import remains a clean addition
+   later; nothing built here forecloses it.
 
 **A cut is allowed and expected.** If any of 5–8 will not be good, it does not ship; 1–4 is a coherent,
 honest product on its own. Shipping four finished things beats eight half-built ones, and Lloyd asked for

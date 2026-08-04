@@ -302,7 +302,32 @@ export default function Dashboard({ dashboard, givens }) {
   }, [recs.rows, verdicts]);
 
   const rated = liked.length + disliked.length;
-  const card = pool[deck];
+
+  // ADAPTIVE DECK. A fixed sequence stops informing after a handful of swipes:
+  // if someone has liked three action films, a fourth teaches almost nothing.
+  // Each next card is the most-voted unrated title whose genres we know LEAST
+  // about, so swipe 15 is worth more than swipe 5 instead of less. Cheap on
+  // purpose -- it reuses the genre already on the seed rows and needs no extra
+  // query, so the deck stays instant.
+  const genreSeen = React.useMemo(() => {
+    const c = {};
+    for (const r of pool) if (verdicts[r.tconst] && r.genre) c[r.genre] = (c[r.genre] || 0) + 1;
+    return c;
+  }, [pool, verdicts]);
+
+  const card = React.useMemo(() => {
+    const unrated = pool.filter((r) => !verdicts[r.tconst]);
+    if (!unrated.length) return null;
+    // `deck` still advances so "haven't seen it" can skip past a card without
+    // rating it; it just no longer dictates the order.
+    let best = null, bestScore = -Infinity;
+    for (const r of unrated) {
+      const known = genreSeen[r.genre || "?"] || 0;
+      const score = -known * 3 + Math.log10(Math.max(10, num(r.num_votes))) - (r._shown || 0) * 10;
+      if (score > bestScore) { bestScore = score; best = r; }
+    }
+    return best;
+  }, [pool, verdicts, genreSeen, deck]);
 
   // keyboard: swipe mode must not require a mouse or a touchscreen
   React.useEffect(() => {
@@ -311,7 +336,7 @@ export default function Dashboard({ dashboard, givens }) {
       if (!card) return;
       if (e.key === "ArrowRight") { rate(card.tconst, "up"); setDeck((d) => d + 1); }
       else if (e.key === "ArrowLeft") { rate(card.tconst, "down"); setDeck((d) => d + 1); }
-      else if (e.key === "ArrowUp" || e.key === " ") { setDeck((d) => d + 1); }
+      else if (e.key === "ArrowUp" || e.key === " ") { card._shown = (card._shown || 0) + 1; setDeck((d) => d + 1); }
       else if ((e.key === "z" && (e.metaKey || e.ctrlKey)) || e.key === "Backspace") undo();
     };
     window.addEventListener("keydown", onKey);
@@ -388,7 +413,7 @@ export default function Dashboard({ dashboard, givens }) {
                   {card.start_year ? Math.round(num(card.start_year)) : ""} · ★ {num(card.average_rating).toFixed(1)}
                   {card.title_type !== "movie" ? ` · ${TYPE_LABEL[card.title_type] || card.title_type}` : ""}
                 </div>
-                <button type="button" onClick={() => setDeck((d) => d + 1)}
+                <button type="button" onClick={() => { card._shown = (card._shown || 0) + 1; setDeck((d) => d + 1); }}
                   style={{ marginTop: 10, font: "inherit", fontSize: 12, cursor: "pointer", padding: "5px 10px",
                            borderRadius: 7, background: ink.surface, color: ink.text2, border: `1px solid ${ink.track}` }}>
                   Haven’t seen it

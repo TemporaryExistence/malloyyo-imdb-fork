@@ -21,12 +21,16 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/docs/data/taste_features.parquet"
-MALLOYYO="${MALLOYYO_BIN:-npx --no-install malloyyo}"
+# Uses the duckdb CLI, not malloyyo: build_data.sh already requires duckdb on
+# PATH and the refresh workflow installs it, whereas malloyyo is only a local
+# dev dependency here. Depending on it would have failed in CI on the first
+# scheduled run and gone unnoticed until the recommender quietly went stale.
+DUCKDB="${DUCKDB_BIN:-duckdb}"
 
 mkdir -p "$(dirname "$OUT")"
 cd "$ROOT"
 
-$MALLOYYO sql duckdb <<SQL
+"$DUCKDB" <<SQL
 COPY (
   WITH t AS (SELECT * FROM 'docs/imdb_titles.parquet'),
   -- Only the roles that actually predict taste. 'self' and archive credits are
@@ -87,7 +91,7 @@ COPY (
 ) TO '$OUT' (FORMAT PARQUET, COMPRESSION ZSTD);
 SQL
 
-$MALLOYYO sql duckdb -e "
+"$DUCKDB" -c "
 SELECT kind, count(*) AS rows, count(DISTINCT feature) AS features,
        round(min(idf),2) AS min_idf, round(max(idf),2) AS max_idf
 FROM '$OUT' GROUP BY 1 ORDER BY 1;"

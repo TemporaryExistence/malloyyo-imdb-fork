@@ -58,7 +58,27 @@ jobs:
         continue-on-error: true
         env:
           TMDB_READ_ACCESS_TOKEN: ${{ secrets.TMDB_READ_ACCESS_TOKEN }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: python3 scripts/resolve_posters.py
+
+      # FORK ADDITION. Taste features are derived from the freshly built titles
+      # and principals, so they MUST rebuild in the same run or the recommender
+      # scores against a stale title list. Cheap and local -- no API, no secret.
+      - name: Rebuild taste features
+        run: bash scripts/build_taste_features.sh
+
+      # FORK ADDITION. This is the one that actually rots. A title leaves
+      # Netflix with no warning, so a "where to watch" answer that is a month
+      # old is worse than none at all on a site whose whole point is telling you
+      # where to watch. Best-effort like posters: a TMDB outage must not discard
+      # the rest of the refresh.
+      # Needs TMDB_READ_ACCESS_TOKEN (v4) or TMDB_API_KEY (v3) as a repo secret.
+      - name: Refresh watch providers
+        continue-on-error: true
+        env:
+          TMDB_READ_ACCESS_TOKEN: ${{ secrets.TMDB_READ_ACCESS_TOKEN }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: python3 scripts/fetch_watch_providers.py --regions US
 
       - name: Commit refreshed data
         run: |
@@ -67,7 +87,9 @@ jobs:
           git add docs/imdb_titles.parquet \
                   docs/imdb_principals.parquet \
                   docs/imdb_names.parquet \
-                  docs/data/poster_paths.parquet
+                  docs/data/poster_paths.parquet \
+                  docs/data/taste_features.parquet \
+                  docs/data/watch_providers.parquet
           # Nothing changed means there was nothing new upstream. That is
           # success, not failure.
           git commit -m "refresh data $(date -u +%F)" || exit 0
