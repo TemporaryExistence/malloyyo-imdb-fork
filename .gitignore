@@ -13,4 +13,4 @@ MANIFESTS
 
 # fork additions
 node_modules/
-scripts/_t*.js
+scripts/_*.js

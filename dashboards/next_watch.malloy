@@ -91,3 +91,35 @@ query: availability is providers -> {
     attribution
   order_by: provider_name
 }
+
+// --- people search (F6 / F4) -------------------------------------------------
+// Naming one actor or director is far cheaper for a visitor than naming ten
+// films, so a person is a legitimate way in. Picking one does NOT mark their
+// filmography as liked -- that would recommend someone the worst film of a
+// favourite actor's career and call it a match. It surfaces their titles to
+// rate, which is the honest version of "seed from a person" (CHARTER F4).
+#" Find a person
+query: search_people is movies -> {
+  where: name ~ $NAME
+  group_by: person is name
+  aggregate:
+    titles is title_count
+    total_ratings
+  order_by: total_ratings desc
+  limit: 24
+}
+
+#" Titles featuring the named person, to rate
+query: titles_by_person is movies -> {
+  where: name ~ $NAME
+  group_by:
+    tconst
+    primary_title is primaryTitle
+    title_type is titleType
+    start_year is startYear
+    average_rating is averageRating
+    num_votes is numVotes
+    poster is movie_image
+  order_by: num_votes desc
+  limit: 40
+}

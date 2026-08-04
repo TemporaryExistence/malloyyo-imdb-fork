@@ -158,6 +158,7 @@ export default function Dashboard({ dashboard, givens }) {
   const gLiked = useGiven("LIKED");
   const gDisliked = useGiven("DISLIKED");
   const gTitle = useGiven("TITLE");
+  const gName = useGiven("NAME");
 
   // verdicts: tconst -> 'up' | 'down'. The single source of truth for the UI;
   // the givens are derived from it so the engine and the screen cannot disagree.
@@ -200,6 +201,9 @@ export default function Dashboard({ dashboard, givens }) {
   const recs = useQuery({ query: "recommendations", givens });
   const avail = useQuery({ query: "availability", givens });
   const found = useQuery({ query: "search_titles", givens });
+  const people = useQuery({ query: "search_people", givens });
+  const personTitles = useQuery({ query: "titles_by_person", givens });
+  const [person, setPerson] = React.useState("");
 
   // availability indexed by title, so a tile lookup is O(1) not a scan
   const offersFor = React.useMemo(() => {
@@ -403,12 +407,42 @@ export default function Dashboard({ dashboard, givens }) {
         <div style={{ margin: "0 0 26px" }}>
           <input
             value={q}
-            onChange={(e) => { setQ(e.target.value); gTitle.set(e.target.value ? filters.contains(e.target.value) : ""); }}
-            placeholder="Search films and shows…"
+            onChange={(e) => {
+              setQ(e.target.value); setPerson("");
+              const v = e.target.value;
+              gTitle.set(v ? filters.contains(v) : "");
+              gName.set(v ? filters.contains(v) : "");
+            }}
+            placeholder="Search films, shows and people…"
             style={{ font: "inherit", fontSize: 14, padding: "8px 11px", borderRadius: 7, width: "min(420px, 100%)",
                      border: `1px solid ${ink.track}`, background: ink.surface, color: ink.text }} />
+          {q && (people.rows || []).length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase",
+                            color: ink.muted, fontWeight: 700, marginBottom: 7 }}>People</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                {(people.rows || []).slice(0, 12).map((r) => (
+                  <button key={r.person} type="button"
+                    onClick={() => { setPerson(r.person); gName.set(filters.oneOf(r.person)); }}
+                    style={{ font: "inherit", fontSize: 12.5, cursor: "pointer", padding: "5px 9px", borderRadius: 7,
+                             background: person === r.person ? ink.accent : ink.surface,
+                             color: person === r.person ? "#fff" : ink.text2,
+                             border: `1px solid ${person === r.person ? ink.accent : ink.track}` }}>
+                    {r.person}
+                    <span style={{ marginLeft: 5, fontSize: 10.5, opacity: 0.6 }}>{Math.round(num(r.titles))}</span>
+                  </button>
+                ))}
+              </div>
+              {person && (
+                <div style={{ fontSize: 12, color: ink.muted, marginTop: 9 }}>
+                  Rate what you have seen of {person}. Picking a person does not assume you liked
+                  everything they are in.
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, ${TILE_W}px)`, gap: 14, marginTop: 14 }}>
-            {(found.rows || []).map((r) => (
+            {(person ? (personTitles.rows || []) : (found.rows || [])).map((r) => (
               <Tile key={r.tconst} ink={ink} row={r} verdict={verdicts[r.tconst]} offers={offersFor[r.tconst]}
                     onRate={(v) => rate(r.tconst, v)} />
             ))}
