@@ -16,3 +16,13 @@ source: titles_table is duckdb.table('docs/imdb_titles.parquet') extend {}
 // scripts/resolve_posters.py. Only the path is stored; the base URL and the
 // size are presentation decisions, applied in imdb.malloy.
 source: poster_paths_table is duckdb.table('docs/data/poster_paths.parquet') extend {}
+
+// FORK ADDITION: per-(title, feature) IDF weights, built by
+// scripts/build_taste_features.sh. One row per genre or person on a title.
+// This is what the recommender scores against; see next_watch.malloy.
+source: taste_features_table is duckdb.table('docs/data/taste_features.parquet') extend {}
+
+// FORK ADDITION: US streaming / rent / buy availability, built by
+// scripts/fetch_watch_providers.py from TMDB. Data is JustWatch's and every row
+// carries its attribution, because TMDB requires the credit on each media item.
+source: watch_providers_table is duckdb.table('docs/data/watch_providers.parquet') extend {}

@@ -82,3 +82,11 @@ query: genre_periods is movies -> {
     total_ratings
   order_by: period
 }
+
+// FORK ADDITION (F1): US availability for the titles on this page, so each
+// poster can carry its provider mark. Every row carries JustWatch's
+// attribution because TMDB requires the credit on each media item.
+#" Where to watch
+query: availability is providers -> {
+  group_by: imdb_id, offer_kind, provider_name, logo_path, link, attribution
+}

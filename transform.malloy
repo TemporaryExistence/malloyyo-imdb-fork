@@ -60,9 +60,24 @@ type: title_type is {
 source: titles_base is raw_titles -> {
 	join_one: raw_ratings on tconst = raw_ratings.tconst
 	join_one: raw_crew on tconst = raw_crew.tconst
-	where: raw_ratings.numVotes::number > 5000 and titleType = 'movie'
+	// FORK CHANGE: television included alongside film.
+	// Upstream was `titleType = 'movie'`. A watchlist people actually keep is
+	// mixed, so excluding TV was excluding half the answer.
+	//   tvSeries / tvMiniSeries - the shows themselves
+	//   tvMovie                 - one-off films made for TV; a film by any
+	//                             reasonable reading, and people search for them
+	// Deliberately NOT tvEpisode: an episode is not a thing you choose to watch
+	// tonight, and including them would swamp the corpus with hundreds of
+	// thousands of rows that no recommendation should ever return.
+	where:
+		raw_ratings.numVotes::number > 5000
+		and titleType = 'movie' | 'tvSeries' | 'tvMiniSeries' | 'tvMovie'
 	select:
 		tconst
+		// Carried so the UI can say "series" vs "film", rank them separately,
+		// and hit the right TMDB endpoint. Votes are NOT comparable across
+		// these: a long-running series accumulates votes a film cannot.
+		titleType
 		isAdult, originalTitle, primaryTitle
 		startYear is startYear:::number 
 		endYear is endYear:::number

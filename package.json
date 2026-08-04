@@ -1,0 +1,29 @@
+{
+  "name": "malloyyo-imdb-fork",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TemporaryExistence/malloyyo-imdb-fork.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/TemporaryExistence/malloyyo-imdb-fork/issues"
+  },
+  "homepage": "https://github.com/TemporaryExistence/malloyyo-imdb-fork#readme",
+  "devDependencies": {
+    "@malloydata/cli": "^0.0.57",
+    "@malloydata/malloyyo": "^0.2.24",
+    "playwright-core": "^1.62.1"
+  }
+}

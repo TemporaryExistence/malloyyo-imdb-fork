@@ -9,3 +9,10 @@ query: works_together is movies -> works_with + {
     aggregate: total_ratings
   }
 }
+
+// FORK ADDITION (F1/F4): same availability feed, so titles listed against a
+// person also show where they can be watched.
+#" Where to watch
+query: availability is providers -> {
+  group_by: imdb_id, offer_kind, provider_name, logo_path, link, attribution
+}

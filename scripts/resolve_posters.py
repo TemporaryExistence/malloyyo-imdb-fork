@@ -238,7 +238,11 @@ def resolve_one(imdb_id: str, headers: dict[str, str], limiter: RateLimiter) -> 
 
 
 def row_from_payload(imdb_id: str, payload: dict) -> dict:
-    results = payload.get("movie_results") or []
+    # FORK CHANGE: also accept television. `find` returns movie_results and
+    # tv_results in separate arrays, and reading only the first meant every
+    # series resolved as "not_found" -- 4,641 of them once TV entered the
+    # corpus. Films still take precedence when an id somehow matches both.
+    results = (payload.get("movie_results") or []) or (payload.get("tv_results") or [])
     if not results:
         return make_row(imdb_id, status="not_found")
     movie = results[0]

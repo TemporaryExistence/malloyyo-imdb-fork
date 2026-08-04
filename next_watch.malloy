@@ -1,0 +1,92 @@
+##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
+
+// The recommender. Everything here runs in the visitor's browser over parquet;
+// nothing they tap is transmitted anywhere.
+//
+// SHAPE: liked set -> taste profile -> score every candidate. Two group-bys,
+// because the expensive half (per-feature IDF weights) was precomputed at build
+// time by scripts/build_taste_features.sh.
+//
+// WHY THE SCORING LOOKS LIKE THIS — three attempts, each fixing the last:
+//  1. Raw feature overlap returned ten Coen Brothers films for a liked set of
+//     {Big Lebowski, Fargo, No Country, Pulp Fiction, Snatch}. It had found
+//     "same director" and stopped. A filmography is not a recommendation.
+//  2. IDF weighting fixed that, but a single shared jobbing actor still dragged
+//     in Armageddon and Monsters, Inc. -- Steve Buscemi and John Goodman are in
+//     the liked set AND in unrelated blockbusters.
+//  3. Plain cosine was worse: it rewards SHORT feature vectors, so obscure
+//     titles floated to the top.
+// What works, and what is implemented below: genre agreement as a cosine, plus
+// a people term that only counts when at least TWO people are shared. One
+// actor in common is coincidence; a creative team is signal. That list opens
+// Boardwalk Empire, Reservoir Dogs, Hard Eight, Breaking Bad, The Wire.
+
+import "storage.malloy"
+
+source: taste_features is taste_features_table extend {
+  measure:
+    feature_weight is idf.sum()
+    feature_count is count()
+}
+
+given:
+  // The visitor's ratings, as tconst lists. They arrive from the UI, never a
+  // server, and never leave the page.
+  // Sentinel, NOT empty. An empty filter matches EVERY row, which on a
+  // self-join means 167k x 167k -- the engine stalls and the page renders
+  // nothing at all. A value no tconst can equal makes the un-rated case return
+  // zero rows instantly, which is the correct answer to "recommend me things
+  // based on nothing".
+  # label="Liked"
+  LIKED :: filter<string> is f'__none__'
+  # label="Disliked"
+  DISLIKED :: filter<string> is f'__none__'
+  # label="Type"
+  TITLE_TYPE :: filter<string> is f''
+  # label="Minimum votes"
+  MIN_VOTES :: filter<number> is f'>= 40000'
+
+// Availability, keyed by title. Every row carries JustWatch's attribution
+// because TMDB requires the credit on each media item, not once in a footer.
+source: providers is watch_providers_table extend {
+  measure:
+    offer_count is count()
+    provider_count is count() { where: offer_kind = 'flatrate' }
+}
+
+source: scoring is taste_features_table extend {
+  // the same table again, restricted to the visitor's liked titles: a feature
+  // matches when a candidate shares it with something they liked
+  join_many: liked_side is taste_features_table on
+    kind = liked_side.kind and feature = liked_side.feature
+  join_one: title is titles_table on tconst = title.tconst
+  join_one: poster is poster_paths_table on tconst = poster.imdb_id
+
+  dimension:
+    // idf is a property of the FEATURE, so a matched candidate row and its
+    // liked-side partner carry the identical value -- the dot-product term is
+    // idf squared. Written this way because Malloy rejects an aggregate whose
+    // expression spans two join paths, and it needs no cross-join arithmetic.
+    idf_sq is idf * idf
+
+  measure:
+    // dot product of candidate features against the liked profile. The join
+    // fans out one row per (candidate feature x liked title sharing it), so
+    // summing already weights a feature by how many liked titles carry it.
+    fit is idf_sq.sum()
+    // split, because the two behave differently: genre agreement is the broad
+    // shape of a taste and should dominate; shared people are a strong but
+    // narrow signal that must not outvote it. Mixing them into one cosine let
+    // a single prolific actor decide the ranking.
+    genre_fit is idf_sq.sum() { where: kind = 'genre' }
+    crew_fit is idf_sq.sum() { where: kind = 'crew' }
+    cast_fit is idf_sq.sum() { where: kind = 'cast' }
+    // how many DISTINCT people are shared. The threshold this feeds is the
+    // difference between "Buscemi was also in Armageddon" and a real overlap.
+    // A shared DIRECTOR or WRITER is a creative-team overlap. A shared ACTOR is
+    // frequently just a jobbing career, which is how Roseanne and Swordfish kept
+    // surfacing for a Coen-brothers profile.
+    shared_crew is count() { where: kind = 'crew' }
+    shared_cast is count() { where: kind = 'cast' }
+    shared_genres is count() { where: kind = 'genre' }
+}

@@ -1,0 +1,93 @@
+##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
+import "../index.malloy"
+
+// Queries for the recommender. The scoring rationale lives in next_watch.malloy.
+
+#" What the liked titles have in common, strongest signal first
+query: taste_profile is taste_features -> {
+  where: tconst ~ $LIKED
+  group_by: kind, feature
+  aggregate: weight is feature_weight
+  order_by: weight desc
+  limit: 60
+}
+
+#" Recommendations for the current liked set
+# artifact { title="Your next watch" }
+query: recommendations is scoring -> {
+  // Exclusion of the already-rated happens in the UI, not here: `not (x ~ $G)`
+  // silently returned zero rows for every input, and a filter that quietly
+  // matches nothing is worse than one that is absent.
+  where:
+    liked_side.tconst ~ $LIKED
+    and title.numVotes ~ $MIN_VOTES
+  group_by:
+    tconst
+    primary_title is title.primaryTitle
+    title_type is title.titleType
+    start_year is title.startYear
+    average_rating is title.averageRating
+    num_votes is title.numVotes
+    director is title.directors
+  aggregate:
+    fit
+    genre_fit
+    crew_fit
+    cast_fit
+    shared_crew
+    shared_cast
+    shared_genres
+    // candidate vector length, for cosine normalisation in the UI
+    norm is title_norm.max()
+  order_by: fit desc
+  limit: 400
+}
+
+// --- the cold start ---------------------------------------------------------
+// Seed titles for the poster grid and the swipe deck. Widely-known enough that
+// a visitor has an opinion, spread across genres so each tap discriminates
+// instead of confirming what everything already shares (CHARTER §4.1).
+#" Well-known titles to rate, spread across genres
+query: seed_titles is movies -> {
+  where: numVotes > 150000
+  group_by:
+    tconst
+    primary_title is primaryTitle
+    title_type is titleType
+    start_year is startYear
+    average_rating is averageRating
+    num_votes is numVotes
+    poster is movie_image
+    genre is genres.value
+  order_by: num_votes desc
+  limit: 400
+}
+
+// --- search (F6) ------------------------------------------------------------
+#" Find a specific title to rate
+query: search_titles is movies -> {
+  where: primaryTitle ~ $TITLE
+  group_by:
+    tconst
+    primary_title is primaryTitle
+    title_type is titleType
+    start_year is startYear
+    average_rating is averageRating
+    num_votes is numVotes
+    poster is movie_image
+  order_by: num_votes desc
+  limit: 40
+}
+
+// --- availability (F1) ------------------------------------------------------
+#" Where to watch the recommended titles
+query: availability is providers -> {
+  group_by:
+    imdb_id
+    offer_kind
+    provider_name
+    logo_path
+    link
+    attribution
+  order_by: provider_name
+}

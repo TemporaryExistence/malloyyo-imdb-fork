@@ -54,6 +54,27 @@ const compact = (n) =>
   n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n);
 /* ========================== end shared viz kit ========================= */
 
+/* --------------------- FORK ADDITION: where to watch -------------------- */
+// TMDB requires JustWatch to be credited on EACH media item, so the mark and
+// its attribution travel together -- the title text on the badge carries it.
+const LOGO = (p) => (p ? "https://image.tmdb.org/t/p/w45" + p : null);
+function ProviderMark({ offers }) {
+  if (!offers || !offers.length) return null;
+  const stream = offers.filter((o) => o.offer_kind === "flatrate");
+  const shown = (stream.length ? stream : offers).slice(0, 3);
+  const all = (stream.length ? stream : offers).map((o) => o.provider_name).join(", ");
+  return (
+    <span title={`${all} - source: JustWatch`}
+          style={{ position: "absolute", right: 3, bottom: 3, display: "flex", gap: 2 }}>
+      {shown.map((o, i) => (
+        <img key={i} src={LOGO(o.logo_path)} alt={o.provider_name} width={16} height={16} loading="lazy"
+             style={{ borderRadius: 3, background: "#fff", display: "block",
+                      boxShadow: "0 0 0 1px rgba(0,0,0,.35)" }} />
+      ))}
+    </span>
+  );
+}
+
 // A given holds a filter EXPRESSION ('Comedy'), not a bare value. Unwrap for
 // display, re-wrap with filters.oneOf when writing back.
 const unwrap = (src) => {
@@ -249,7 +270,7 @@ function Timeline({ ink, periods, range, onSelect }) {
 /* ---------------------------------- shelves ---------------------------- */
 const TILE_W = 104;
 
-function Tile({ ink, row }) {
+function Tile({ ink, row, offers }) {
   const [bad, setBad] = React.useState(false);
   const frame = { width: TILE_W, height: 156, borderRadius: 7, background: ink.track, overflow: "hidden", display: "block" };
   return (
@@ -258,8 +279,10 @@ function Tile({ ink, row }) {
       target="_blank"
       rel="noopener noreferrer"
       title={`${row.title} (${row.release_year})`}
-      style={{ width: TILE_W, flex: "none", textDecoration: "none", color: "inherit", display: "block" }}
+      style={{ width: TILE_W, flex: "none", textDecoration: "none", color: "inherit", display: "block",
+               position: "relative" }}
     >
+      <ProviderMark offers={offers} />
       {row.movie_image && !bad ? (
         <img
           src={row.movie_image}
@@ -294,7 +317,7 @@ function Tile({ ink, row }) {
 
 const PER_ROW = 7;
 
-function Shelf({ ink, genre, shelf }) {
+function Shelf({ ink, genre, shelf, offersFor}) {
   // Rows revealed so far. Resets when the shelf's contents change (new genre or
   // period) so a deep-expanded shelf doesn't stay expanded into the next view.
   const [rows, setRows] = React.useState(1);
@@ -323,7 +346,7 @@ function Shelf({ ink, genre, shelf }) {
         gridTemplateColumns: `repeat(${PER_ROW}, ${TILE_W}px)`,
         overflowX: "auto", paddingBottom: 4,
       }}>
-        {visible.map((t, i) => <Tile key={t.tconst || i} ink={ink} row={t} />)}
+        {visible.map((t, i) => <Tile key={t.tconst || i} ink={ink} row={t} offers={offersFor && offersFor[t.tconst]} />)}
       </div>
 
       {remaining > 0 && (
@@ -346,6 +369,13 @@ function Shelf({ ink, genre, shelf }) {
 /* -------------------------------- dashboard ---------------------------- */
 export default function Dashboard({ dashboard, givens }) {
   const { ink } = useTheme();
+  // FORK ADDITION: US availability, indexed by title so a tile lookup is O(1).
+  const avail = useQuery({ query: "availability", givens });
+  const offersFor = React.useMemo(() => {
+    const m = {};
+    for (const r of avail.rows || []) (m[r.imdb_id] = m[r.imdb_id] || []).push(r);
+    return m;
+  }, [avail.rows]);
   const gGenre = useGiven("GENRE");
   const gYear = useGiven("RELEASE_YEAR");
 
@@ -438,7 +468,7 @@ export default function Dashboard({ dashboard, givens }) {
             {range ? ` in ${range.lo}–${range.hi + 4}` : ""}.
           </div>
         ) : (
-          shown.map((s) => <Shelf key={s.subgenre} ink={ink} genre={genre} shelf={s} />)
+          shown.map((s) => <Shelf key={s.subgenre} ink={ink} genre={genre} shelf={s} offersFor={offersFor} />)
         )}
       </div>
     </div>

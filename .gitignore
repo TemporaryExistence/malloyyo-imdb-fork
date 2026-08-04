@@ -10,3 +10,7 @@ MANIFESTS
 
 # local Claude Code config (machine-specific paths)
 .claude/
+
+# fork additions
+node_modules/
+scripts/_t*.js
