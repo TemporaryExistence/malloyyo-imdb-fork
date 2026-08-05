@@ -6,7 +6,7 @@
 
 ## 1. STATUS: Andrew's eight rejections are all addressed. PUSHED AND LIVE.
 
-Live at https://temporaryexistence.github.io/malloyyo-imdb-fork/ at `7c9ab91`. Verified against the
+Live at https://temporaryexistence.github.io/malloyyo-imdb-fork/ at `84516cc`. Verified against the
 LIVE URL, not localhost: the served `assets/next_watch.js` is byte-identical to the local build and
 the full stress suite passes against the public site.
 
@@ -52,19 +52,27 @@ block comment on that query says so. Genre is carried out as a plain list column
 - Read as images at 1440×900, 1440×1200, 390×844 and dark mode.
 - Cold start measured in the browser: 28 titles, **14 film / 14 TV**.
 
-## 4. THE ONE PROCESS STEP NOT RUN
+## 4. THE RATER GATE HAS RUN
 
-**The context-isolated rater gate (CHARTER §5) has NOT run this session** — this agent is not
-spawning subagents. Run it before showing Lloyd anything:
-```
-/run-rater
-```
+**8.6/10, APPROVE (predicted). No blocking gaps.** Prior version was 5.7 NEEDS-WORK.
+Card: `agents/rater/rating-log/2026-08-04_malloyyo-imdb-fork_next-watch-v2.md`.
+
+- It verified all eight of Andrew's defects itself against the rendered page rather than on report.
+- **Style gate PASS, measured:** our `next_watch` gutters run 184→1256 at 1440, identical to
+  Lloyd's `genre_pairs` (it was 0→1440 before). Poster 103px/6px vs his 104px/7px; ink, type and
+  dark-mode tokens identical. *"A stranger could not tell which parts we added."*
+- Three residuals it named are **all closed** in `84516cc`: card 74vh→82vh (738 of 900 desktop,
+  692 of 844 mobile), a search empty state, and the JustWatch credit moved out of a hover-only
+  tooltip into alt text. Each has a permanent assertion in `stress.js`.
+- It checked three things against Lloyd's own pages before blaming us, and they are his: mobile
+  timeline label clipping, `works_together` vote formatting, grey rec tiles in full-page captures.
 
 ## 5. STILL OPEN
 
+- **Recommendation quality on sparse input** — one like on Gladiator returns The Counselor /
+  Robin Hood / King Arthur. The rater flagged it; it is a **taste call and Andrew's**, deliberately
+  not quietly tuned.
 - **Ratings-CSV import** — cut, and the build order (§2A item 8) explicitly permits it.
-- The recommender with **zero title ratings and only people liked** returns "every title carrying
-  those people, most-voted first". Correct and documented, but it reads generic. Worth revisiting.
 - Nothing has been proposed upstream. §6.2: not until Lloyd asks.
 
 ## 6. HOW TO WORK ON THIS
