@@ -6,7 +6,7 @@
 
 ## 1. STATUS: Andrew's eight rejections are all addressed. PUSHED AND LIVE.
 
-Live at https://temporaryexistence.github.io/malloyyo-imdb-fork/ at `84516cc`. Verified against the
+Live at https://temporaryexistence.github.io/malloyyo-imdb-fork/ at `435f869`. Verified against the
 LIVE URL, not localhost: the served `assets/next_watch.js` is byte-identical to the local build and
 the full stress suite passes against the public site.
 
@@ -66,12 +66,18 @@ Card: `agents/rater/rating-log/2026-08-04_malloyyo-imdb-fork_next-watch-v2.md`.
   tooltip into alt text. Each has a permanent assertion in `stress.js`.
 - It checked three things against Lloyd's own pages before blaming us, and they are his: mobile
   timeline label clipping, `works_together` vote formatting, grey rec tiles in full-page captures.
+- ⚑ **Its fourth item was NOT a taste call.** "Recommendation quality degrades on sparse input"
+  turned out to hide a reproducible **ordering inversion**: with one liked title, genre_fit spans 5%
+  while the cosine denominator spans 47%, so the denominator decided the order and The Counselor
+  (genre_fit 5.74) outranked Kingdom of Heaven (6.03) and First Knight (6.03). Fixed in `435f869`
+  for profiles under three titles only, with an unconditional stress assertion.
 
 ## 5. STILL OPEN
 
-- **Recommendation quality on sparse input** — one like on Gladiator returns The Counselor /
-  Robin Hood / King Arthur. The rater flagged it; it is a **taste call and Andrew's**, deliberately
-  not quietly tuned.
+- **Rich-profile ranking is untouched and unresolved as a question.** The thin-profile inversion is
+  fixed (below), but whether the cosine is the right ranking for a RICH liked set was never
+  re-examined; measured against the validated Coen/Tarantino set, the thin-profile ordering is a
+  lateral move, so it was deliberately not applied there. Still Andrew's call if he wants it changed.
 - **Ratings-CSV import** — cut, and the build order (§2A item 8) explicitly permits it.
 - Nothing has been proposed upstream. §6.2: not until Lloyd asks.
 
