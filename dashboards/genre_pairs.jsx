@@ -284,25 +284,31 @@ function Tile({ ink, row, offers }) {
       style={{ width: TILE_W, flex: "none", textDecoration: "none", color: "inherit", display: "block",
                position: "relative" }}
     >
-      <ProviderMark offers={offers} />
-      {row.movie_image && !bad ? (
-        <img
-          src={row.movie_image}
-          alt={`Poster for ${row.title}`}
-          width={TILE_W}
-          height={156}
-          loading="lazy"
-          onError={() => setBad(true)}
-          style={{ ...frame, objectFit: "cover" }}
-        />
-      ) : (
-        <div style={{ ...frame, display: "grid", placeItems: "center" }} aria-hidden="true">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={ink.muted} strokeWidth="1.5">
-            <rect x="3" y="3" width="18" height="18" rx="2.5" />
-            <path d="m4 16 4.5-4.5 3 3L15 11l5 5" />
-          </svg>
-        </div>
-      )}
+      {/* The mark is anchored to the POSTER, not to the whole tile. Anchored to
+          the tile its bottom:3 sat on the caption, and 34 of 123 marks covered
+          the year and vote count (worst case 54px of text). Invisible while only
+          three marks rendered; obvious the moment the query was fixed. */}
+      <span style={{ position: "relative", display: "block", width: TILE_W, height: 156 }}>
+        {row.movie_image && !bad ? (
+          <img
+            src={row.movie_image}
+            alt={`Poster for ${row.title}`}
+            width={TILE_W}
+            height={156}
+            loading="lazy"
+            onError={() => setBad(true)}
+            style={{ ...frame, objectFit: "cover" }}
+          />
+        ) : (
+          <div style={{ ...frame, display: "grid", placeItems: "center" }} aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={ink.muted} strokeWidth="1.5">
+              <rect x="3" y="3" width="18" height="18" rx="2.5" />
+              <path d="m4 16 4.5-4.5 3 3L15 11l5 5" />
+            </svg>
+          </div>
+        )}
+        <ProviderMark offers={offers} />
+      </span>
       <div style={{
         fontSize: 12.5, fontWeight: 600, color: ink.text, lineHeight: 1.28,
         marginTop: 7,
@@ -372,17 +378,25 @@ function Shelf({ ink, genre, shelf, offersFor}) {
 export default function Dashboard({ dashboard, givens }) {
   const { ink } = useTheme();
   // FORK ADDITION: US availability, indexed by title so a tile lookup is O(1).
+  // Four vote bands, merged. One query cannot answer this: 15,343 titles have US
+  // streaming and the runtime caps a result at 5,000 rows regardless of `limit`
+  // (measured — raising it to 20,000 changed nothing on screen).
   const avail = useQuery({ query: "availability", givens });
+  const availB = useQuery({ query: "availability_b", givens });
+  const availC = useQuery({ query: "availability_c", givens });
+  const availD = useQuery({ query: "availability_d", givens });
   const offersFor = React.useMemo(() => {
     const m = {};
-    for (const r of avail.rows || []) {
-      m[r.imdb_id] = {
-        logos: String(r.logos || "").split("|").filter(Boolean).slice(0, 3),
-        names: r.names || "",
-      };
+    for (const q of [avail, availB, availC, availD]) {
+      for (const r of q.rows || []) {
+        m[r.imdb_id] = {
+          logos: String(r.logos || "").split("|").filter(Boolean).slice(0, 3),
+          names: r.names || "",
+        };
+      }
     }
     return m;
-  }, [avail.rows]);
+  }, [avail.rows, availB.rows, availC.rows, availD.rows]);
   const gGenre = useGiven("GENRE");
   const gYear = useGiven("RELEASE_YEAR");
 

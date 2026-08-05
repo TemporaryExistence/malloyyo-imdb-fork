@@ -599,6 +599,50 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     else ok(`genre_pairs carries provider marks (${gpm.logos} over ${gpm.posters} posters)`);
     await gp.close();
 
+    // ⛔ THE ROW-CAP CANARY, and it is a named title rather than a percentage on
+    // purpose. A coverage ratio cannot tell "the cap is hiding marks" from "these
+    // films genuinely do not stream" — measured against the parquet, only 24 of
+    // the 44 Film-Noir tiles have US streaming at all, so a 55% ratio there is
+    // CORRECT and a threshold would have failed a working page.
+    // The canary is Zorro (tt0050079), rank 15,252 of the 15,343 titles with US
+    // streaming — the very bottom of the tail, and it renders on the Western
+    // page. It can only carry a badge if the DEEPEST band query is working, so
+    // it fails the moment the bands collapse back into one capped result.
+    // (El Dorado was the first choice and is a better-known example of the bug,
+    // but it never renders here — the shelves show seven per subgenre — and a
+    // canary that is not on the page is a check that cannot fail for the right
+    // reason.)
+    const wn = await b.newPage({ viewport: { width: 1440, height: 1200 } });
+    await wn.goto(BASE + "/genre_pairs.html?$GENRE=Western", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await wn.waitForTimeout(20000);
+    await wn.evaluate(async () => {
+      for (let y = 0; y < document.body.scrollHeight; y += 500) { window.scrollTo(0, y); await new Promise((r) => setTimeout(r, 100)); }
+    });
+    await wn.waitForTimeout(3000);
+    const canary = await wn.evaluate(() => {
+      const a = [...document.querySelectorAll('a[href*="tt0050079"]')][0];
+      return a ? { found: true, marked: !!a.querySelector('img[src*="/t/p/w45"]') } : { found: false };
+    });
+    if (!canary.found) note("row-cap-canary", "Zorro (tt0050079) not on the Western page — check the fixture, not the cap");
+    else if (!canary.marked) note("row-cap-canary", "Zorro has US streaming but no mark — the 5,000-row cap is biting again");
+    else ok("row-cap canary marked (Zorro, rank 15252 of 15343 streaming titles)");
+
+    // A mark must not cover the caption it sits beside.
+    const overlap = await wn.evaluate(() => {
+      let n = 0;
+      for (const a of document.querySelectorAll('a[href*="imdb.com/title/"]')) {
+        const mk = a.querySelector('img[src*="/t/p/w45"]');
+        if (!mk) continue;
+        const m = mk.getBoundingClientRect();
+        const cap = [...a.children].slice(1).map((c) => c.getBoundingClientRect()).find((c) => c.height > 0);
+        if (cap && m.bottom > cap.top + 1) n++;
+      }
+      return n;
+    });
+    if (overlap) note("mark-overlap", `${overlap} provider marks cover the title/year caption`);
+    else ok("no provider mark covers its caption");
+    await wn.close();
+
     // ⛔ "NOT SEEN" MUST SURVIVE A RATING. It was stored by mutating the seed
     // query's row; rating writes a given, the runtime re-runs its queries, the
     // fresh rows lack the mutation, and the skipped card returned ~2 swipes

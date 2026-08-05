@@ -95,17 +95,54 @@ query: genre_periods is movies -> {
 // carrying THREE marks. Nothing errored; the feature was simply, quietly
 // missing. next_watch's copy of this query was fixed for exactly this months
 // ago and this one was never given the same treatment.
-// Collapsing to one row per title makes the payload an order of magnitude
-// smaller AND complete; ordering by votes means the 5,000 that survive are the
-// ones actually on screen.
-#" Where to watch
+// Collapsing to one row per title cut it to 15,343 rows — an order of magnitude
+// smaller, and ordering by votes meant the 5,000 that survived were at least the
+// most-watched ones. But 15,343 > 5,000, so 10,343 titles STILL could not be
+// marked and coverage fell to 36% on a small genre like Western: El Dorado
+// (1966), on MGM Plus and YouTube TV, showed nothing.
+//
+// ⛔ AND `limit` DOES NOT LIFT THE CAP — measured, not assumed. Raising it to
+// 20,000 changed the rendered page not at all: still 37% on Western, El Dorado
+// still bare. The cap is the runtime's, and asking louder does not move it.
+//
+// So the result is SPLIT INTO FOUR VOTE BANDS at the quartiles of the streamable
+// set, each ~3,836 rows and comfortably under the cap, merged in the UI. Four
+// queries of a third the size beat one that silently drops two thirds of its
+// answer. The bands are vote quartiles because votes are already the axis the
+// page orders by, so a band maps to a coherent slice rather than an arbitrary one.
+#" Where to watch — most-watched band
 query: availability is providers -> {
-  where: offer_kind = 'flatrate'
+  where: offer_kind = 'flatrate' and title.numVotes >= 50400
   group_by: imdb_id
   aggregate:
     logos is string_agg(logo_path, '|')
     names is string_agg(provider_name, ', ')
-    votes is title.numVotes.max()
-  order_by: votes desc
+  limit: 5000
+}
+#" Where to watch — upper-middle band
+query: availability_b is providers -> {
+  where: offer_kind = 'flatrate' and title.numVotes >= 16866 and title.numVotes < 50400
+  group_by: imdb_id
+  aggregate:
+    logos is string_agg(logo_path, '|')
+    names is string_agg(provider_name, ', ')
+  limit: 5000
+}
+#" Where to watch — lower-middle band
+query: availability_c is providers -> {
+  where: offer_kind = 'flatrate' and title.numVotes >= 8414 and title.numVotes < 16866
+  group_by: imdb_id
+  aggregate:
+    logos is string_agg(logo_path, '|')
+    names is string_agg(provider_name, ', ')
+  limit: 5000
+}
+#" Where to watch — long tail
+query: availability_d is providers -> {
+  where: offer_kind = 'flatrate' and title.numVotes < 8414
+  group_by: imdb_id
+  aggregate:
+    logos is string_agg(logo_path, '|')
+    names is string_agg(provider_name, ', ')
   limit: 5000
 }
