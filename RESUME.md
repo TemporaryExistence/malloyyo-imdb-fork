@@ -6,7 +6,7 @@
 
 ## 1. STATUS: Andrew's eight rejections are all addressed. PUSHED AND LIVE.
 
-Live at https://temporaryexistence.github.io/malloyyo-imdb-fork/ at `c41edc8`. Verified against the
+Live at https://temporaryexistence.github.io/malloyyo-imdb-fork/ at `ac0f9fd`. Verified against the
 LIVE URL, not localhost: the served `assets/next_watch.js` is byte-identical to the local build and
 the full stress suite passes against the public site.
 
@@ -52,7 +52,22 @@ block comment on that query says so. Genre is carried out as a plain list column
 - Read as images at 1440×900, 1440×1200, 390×844 and dark mode.
 - Cold start measured in the browser: 28 titles, **14 film / 14 TV**.
 
-## 4. THE RATER GATE HAS RUN
+## 4. THE RATER GATE HAS RUN FIVE TIMES — read this before trusting a "done"
+
+| pass | score | outcome |
+|---|---|---|
+| v2 | 8.6 APPROVE | 3 residuals |
+| v3 | 7.6 NEEDS-WORK | 4 blocking gaps a GREEN suite missed |
+| v4 | 7.6 NEEDS-WORK | 3 more, incl. a dislike-only profile emptying the page |
+| v5 | 8.1 NEEDS-WORK | caught that the fold fix had SHRUNK the picture, and that my own check would have certified it |
+| — | — | all fixed; v6 not yet run |
+
+⚑ **The standing lesson: a green suite here has twice meant "extended for the known list", not
+"correct".** Every pass found real defects the suite was green over. Do not read green as done.
+⚑ **A threshold parked below what the code currently does will ratify whatever it does next** —
+`card is nearly full screen` used 0.70 while the card was at 0.82, so a drop to 0.73 passed.
+
+### The earlier v2 gate
 
 **8.6/10, APPROVE (predicted). No blocking gaps.** Prior version was 5.7 NEEDS-WORK.
 Card: `agents/rater/rating-log/2026-08-04_malloyyo-imdb-fork_next-watch-v2.md`.
