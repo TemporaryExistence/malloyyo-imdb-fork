@@ -247,7 +247,10 @@ const TYPE_LABEL = { movie: "Film", tvSeries: "Series", tvMiniSeries: "Mini-seri
 // credit travel together and neither renders without the other.
 const LOGO = (p) => (p ? "https://image.tmdb.org/t/p/w45" + p : null);
 
-function ProviderMark({ ink, offers }) {
+// `size` because the same mark sits on a 103px grid tile and on a ~480px swipe
+// card. At a fixed 16px it was proportionate on the tile and nearly invisible on
+// the card, which is the one surface where the visitor is looking hardest.
+function ProviderMark({ ink, offers, size = 16 }) {
   if (!offers || !offers.logos || !offers.logos.length) return null;
   // The credit lived ONLY in a `title=` tooltip, which a touch device can never
   // open -- so on a phone the per-item attribution was effectively absent. The
@@ -256,9 +259,9 @@ function ProviderMark({ ink, offers }) {
   const credit = `${offers.names} - source: JustWatch`;
   return (
     <div title={credit} aria-label={credit} role="img"
-         style={{ position: "absolute", right: 3, bottom: 3, display: "flex", gap: 2 }}>
+         style={{ position: "absolute", right: size <= 16 ? 3 : 8, bottom: size <= 16 ? 3 : 8, display: "flex", gap: size <= 16 ? 2 : 4 }}>
       {offers.logos.map((p, i) => (
-        <img key={i} src={LOGO(p)} alt={i === 0 ? credit : ""} width={16} height={16} loading="lazy"
+        <img key={i} src={LOGO(p)} alt={i === 0 ? credit : ""} width={size} height={size} loading="lazy"
              style={{ borderRadius: 3, boxShadow: "0 0 0 1px rgba(0,0,0,.35)", background: "#fff", display: "block" }} />
       ))}
     </div>
@@ -595,6 +598,7 @@ function SwipeStage({ ink, kind, image, title, subtitle, meta, mark, onLike, onD
 /* -------------------------------- dashboard ---------------------------- */
 export default function Dashboard({ dashboard, givens }) {
   const { ink } = useTheme();
+  const narrow = useNarrow();
   const gLiked = useGiven("LIKED");
   const gDisliked = useGiven("DISLIKED");
   const gTitle = useGiven("TITLE");
@@ -1229,8 +1233,11 @@ export default function Dashboard({ dashboard, givens }) {
                   gType.set(k === "people" ? "" : filters.oneOf(k));
                 }}>{label}</Chip>
             ))}
+            {/* A phone has no arrow keys and nothing to "click"; naming desktop
+                inputs on a touch device is instructions for someone else's
+                device. */}
             <span style={{ fontSize: 12, color: ink.muted, marginLeft: 6 }}>
-              Drag, click a side, or use arrow keys.
+              {narrow ? "Swipe, or tap a side." : "Drag, click a side, or use arrow keys."}
             </span>
           </div>
           {usePersonCard ? (
@@ -1248,7 +1255,7 @@ export default function Dashboard({ dashboard, givens }) {
               image={card.poster ? card.poster.replace("/w154", "/w500") : null}
               title={card.primary_title}
               subtitle={`${card.start_year ? Math.round(num(card.start_year)) : ""} · ★ ${num(card.average_rating).toFixed(1)}`}
-              mark={<ProviderMark ink={ink} offers={offersFor[card.tconst]} />}
+              mark={<ProviderMark ink={ink} offers={offersFor[card.tconst]} size={28} />}
               onLike={() => { rate(card.tconst, "up"); setDeck((d) => d + 1); }}
               onDislike={() => { rate(card.tconst, "down"); setDeck((d) => d + 1); }}
               onSkip={() => { card._shown = (card._shown || 0) + 1; setDeck((d) => d + 1); }} />
@@ -1298,6 +1305,15 @@ export default function Dashboard({ dashboard, givens }) {
           {/* A search that matches nothing rendered silent white space, so a
               typo was indistinguishable from a page that had stopped working.
               Same wording the results list already uses. */}
+          {/* Searching a person's name matches PEOPLE and no titles, so the
+              grid below came up empty and the whole thing read as "no results"
+              — with the one control that would have helped sitting unexplained
+              right above it. */}
+          {q && !person && (found.rows || []).length === 0 && (people.rows || []).length > 0 && (
+            <div style={{ fontSize: 12.5, color: ink.muted, marginTop: 14 }}>
+              Pick a name to rate their titles.
+            </div>
+          )}
           {q && !person && (found.rows || []).length === 0 && (people.rows || []).length === 0 && (
             <div style={{ fontSize: 12.5, color: ink.muted, marginTop: 14 }}>
               Nothing matches “{q}”.
