@@ -1,18 +1,35 @@
 ##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
 import "../index.malloy"
 
-# artifact { title="People that worked together" givens {NAME='Tom Hanks'}}
-query: works_together is movies -> works_with + {
-  where: name ~ $NAME
-  nest: by_title is {
-    group_by: title
-    aggregate: total_ratings
-  }
+// FORK ADDITION (F4). This was previously recorded as a deliberate CUT: this
+// page has no custom React component -- Lloyd renders it with Malloy's built-in
+// table renderer -- and adding provider marks was taken to mean replacing his
+// page with a bespoke component, which §5's style ruling forbids. That premise
+// was wrong. His renderer already draws tagged columns, so availability can be
+// added as one more column IN his table: additive, no component, no redesign.
+// One row per title, so joining it cannot fan the table out.
+source: title_streaming is providers -> {
+  where: offer_kind = 'flatrate'
+  group_by: imdb_id
+  aggregate: services is string_agg(provider_name, ', ')
+} extend {
+  primary_key: imdb_id
 }
 
-// FORK ADDITION (F1/F4): same availability feed, so titles listed against a
-// person also show where they can be watched.
-#" Where to watch
-query: availability is providers -> {
-  group_by: imdb_id, offer_kind, provider_name, logo_path, link, attribution
+source: movies_streaming is movies extend {
+  join_one: streaming is title_streaming on tconst = streaming.imdb_id
+  dimension:
+    // TMDB requires the JustWatch credit on EACH media item, so the label
+    // carries it rather than sitting once in a footer.
+    # label="Streaming (US, via JustWatch)"
+    where_to_watch is streaming.services
+}
+
+# artifact { title="People that worked together" givens {NAME='Tom Hanks'}}
+query: works_together is movies_streaming -> works_with + {
+  where: name ~ $NAME
+  nest: by_title is {
+    group_by: title, where_to_watch
+    aggregate: total_ratings
+  }
 }

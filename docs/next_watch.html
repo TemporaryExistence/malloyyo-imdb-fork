@@ -16,7 +16,7 @@ window.__DASHBOARD__ = {"name":"next_watch","query":"recommendations","title":"Y
 // given: declarations at BUILD time — the runtime reads them from here to draw
 // controls and seed initial values. Without them there are no controls and
 // every given starts empty.
-window.__GIVENS__ = [{"name":"LIKED","type":"filter<string>","filterType":"string","default":"__none__","tags":{"label":"Liked"}},{"name":"MIN_VOTES","type":"filter<number>","filterType":"number","default":">= 40000","tags":{"label":"Minimum votes"}}];
+window.__GIVENS__ = [{"name":"LIKED","type":"filter<string>","filterType":"string","default":"__none__","tags":{"label":"Liked"}},{"name":"MIN_VOTES","type":"filter<number>","filterType":"number","default":">= 40000","tags":{"label":"Minimum votes"}},{"name":"RELEASE_YEAR","type":"filter<number>","filterType":"number","default":"","tags":{"label":"Year"}}];
 // __INITIAL_GIVENS__ is NOT set here on purpose: the entry bundle sets it from
 // location.search using shared/givens-url, the same encoder the dev server uses.
 // An inline copy is what drifted last time (it stripped the dollar-sign prefix

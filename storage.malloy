@@ -26,3 +26,8 @@ source: taste_features_table is duckdb.table('docs/data/taste_features.parquet')
 // scripts/fetch_watch_providers.py from TMDB. Data is JustWatch's and every row
 // carries its attribution, because TMDB requires the credit on each media item.
 source: watch_providers_table is duckdb.table('docs/data/watch_providers.parquet') extend {}
+
+// FORK ADDITION: nm id -> TMDB profile photo, resolved at build time by
+// scripts/fetch_person_images.py. A person card without a face is just a name
+// in a box.
+source: person_images_table is duckdb.table('docs/data/person_images.parquet') extend {}

@@ -1,6 +1,12 @@
 ##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
 import "../index.malloy"
 
+// Dashboard-local, exactly as genre_pairs.malloy declares its own. GENRE is
+// shared from imdb.malloy; the year range is per-page in upstream's design.
+given:
+  # label="Year"
+  RELEASE_YEAR :: filter<number> is f''
+
 // Queries for the recommender. The scoring rationale lives in next_watch.malloy.
 
 #" What the liked titles have in common, strongest signal first
@@ -22,9 +28,19 @@ query: recommendations is scoring -> {
   // and the candidate field returned ZERO rows for every input -- Malloy cannot
   // push a join-side filter through a disjunction, and the failure was silent.
   // Liked PEOPLE are a separate query (below), merged in the UI.
+  // ⛔ DO NOT ADD `title.genres.value ~ $GENRE` HERE. It was added on 2026-08-04,
+  // compiled, linted green, and was never bundled. `genres.value` is an UNNEST
+  // across a source that is already fanned out one row per (candidate feature x
+  // liked title sharing it): the query went 3.1s -> 60s+ locally and never
+  // returned at all in DuckDB-WASM. Because the dashboard runs its queries in
+  // one queue, that single hang stalled EVERY query on the page -- the genre
+  // chips, the timeline, the poster grid, the swipe deck, all empty, with no
+  // error anywhere. Genre is carried out as a plain list column below and
+  // filtered in the UI, exactly as `director` already is.
   where:
     liked_side.tconst ~ $LIKED
     and title.numVotes ~ $MIN_VOTES
+    and title.startYear ~ $RELEASE_YEAR
   group_by:
     tconst
     primary_title is title.primaryTitle
@@ -33,6 +49,9 @@ query: recommendations is scoring -> {
     average_rating is title.averageRating
     num_votes is title.numVotes
     director is title.directors
+    // scalar list column, NOT an unnest join. Costs nothing and lets the UI do
+    // the genre filter that the where-clause above must never do.
+    genres is title.genres
     // was missing entirely: the list rendered grey placeholders under a wall of
     // real posters and read as broken rather than as a different section
     poster is pick null when poster.poster_path is null
@@ -58,6 +77,9 @@ query: recommendations is scoring -> {
 #" Well-known titles to rate, spread across genres
 query: seed_titles is movies -> {
   where: numVotes > 150000
+     and genres.value ~ $GENRE
+     and startYear ~ $RELEASE_YEAR
+     and titleType ~ $TITLE_TYPE
   group_by:
     tconst
     primary_title is primaryTitle
@@ -181,9 +203,11 @@ query: seed_people is movies -> {
 // on an actor touches every title they are in, so this needs no join at all.
 query: recommendations_by_person is scoring -> {
   where:
+    // same reason as `recommendations`: no `genres.value` unnest on this source
     feature ~ $LIKED_PEOPLE
     and title.numVotes ~ $MIN_VOTES
     and title.titleType ~ $TITLE_TYPE
+    and title.startYear ~ $RELEASE_YEAR
   group_by:
     tconst
     primary_title is title.primaryTitle
@@ -192,10 +216,80 @@ query: recommendations_by_person is scoring -> {
     average_rating is title.averageRating
     num_votes is title.numVotes
     director is title.directors
+    genres is title.genres
     poster is pick null when poster.poster_path is null
       else concat('https://image.tmdb.org/t/p/w154', poster.poster_path)
   aggregate:
     person_hits is count()
   order_by: num_votes desc
+  limit: 60
+}
+
+// --- filters, matching what upstream's own pages offer ----------------------
+#" Genres to filter by
+query: nw_genre_options is movies -> {
+  group_by: genre is genres.value
+  aggregate: title_count
+  having: title_count >= 100
+  order_by: title_count desc
+}
+
+#" Titles per five-year period, for the timeline
+query: nw_periods is movies -> {
+  where: genre ~ $GENRE
+  group_by: period is floor(release_year / 5) * 5
+  aggregate: title_count
+  order_by: period
+}
+
+// A person card with no face is a name in a box, which is what shipped and what
+// Andrew rejected first. The photo comes from person_images (built by
+// scripts/fetch_person_images.py); joining it here rather than in imdb.malloy
+// keeps Lloyd's file untouched.
+source: movies_with_faces is movies extend {
+  join_one: face is person_images on principals.nconst = face.nconst
+}
+
+#" People to swipe on, split by whether their work is film or television
+query: seed_people_typed is movies_with_faces -> {
+  where: numVotes > 200000
+     and (principals.category = 'actor' | 'actress' | 'director' | 'writer')
+     and titleType ~ $TITLE_TYPE
+  group_by:
+    person is name
+    nconst is principals.nconst
+    // w500 because the card is now most of the screen; w342 visibly softens at
+    // that size. Null when TMDB has no portrait -- 1,798 of 13,560 -- rather
+    // than a URL that 404s into a broken-image icon.
+    photo is pick null when face.profile_path is null or face.profile_path = ''
+      else concat('https://image.tmdb.org/t/p/w500', face.profile_path)
+  aggregate: titles is title_count, total_ratings
+  order_by: total_ratings desc
+  limit: 150
+}
+
+// --- the cold start (CHARTER §4) --------------------------------------------
+// "The tool must produce a defensible list from ZERO explicit input. A blank
+// 'pick 10 movies to begin' screen is a failure of this charter."
+// The previous fix DELETED the empty block, which answers Andrew's complaint
+// and breaks the charter in the same edit. This is the list that stands in its
+// place: widely seen and highly rated, inside whatever genre / period / type is
+// selected, labelled for what it is rather than dressed up as personal.
+#" Acclaimed and widely seen: the list before anyone has rated anything
+query: popular_picks is movies -> {
+  where: numVotes > 100000
+     and averageRating >= 7.5
+     and genres.value ~ $GENRE
+     and startYear ~ $RELEASE_YEAR
+     and titleType ~ $TITLE_TYPE
+  group_by:
+    tconst
+    primary_title is primaryTitle
+    title_type is titleType
+    start_year is startYear
+    average_rating is averageRating
+    num_votes is numVotes
+    poster is movie_image
+  order_by: average_rating desc
   limit: 60
 }

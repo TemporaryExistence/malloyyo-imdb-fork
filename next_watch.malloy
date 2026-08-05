@@ -57,9 +57,16 @@ given:
   // their filmography is NOT marked as liked.
   # label="Liked people"
   LIKED_PEOPLE :: filter<string> is f'__none__'
+  // GENRE and RELEASE_YEAR are UPSTREAM'S, defined in imdb.malloy and already
+  // driving his genre-pairs page. Reused rather than redefined so both pages
+  // filter identically and a fork user is not learning two behaviours.
 
 // Availability, keyed by title. Every row carries JustWatch's attribution
 // because TMDB requires the credit on each media item, not once in a footer.
+source: person_images is person_images_table extend {
+  primary_key: nconst
+}
+
 source: providers is watch_providers_table extend {
   // joined so availability can be ordered by popularity -- see the row cap
   // documented on the availability query

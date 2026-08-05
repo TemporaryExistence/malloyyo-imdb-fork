@@ -104,7 +104,11 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     for (const t of tiles.slice(0, 5)) { await t.click(); await p.waitForTimeout(250); }
     await p.waitForTimeout(9000);
     const txt = await p.evaluate(() => document.body.innerText);
-    const m = txt.match(/(\d+) suggestions from (\d+) rating/);
+    // Keyed on the COUNTS, not on the sentence. The first version matched the
+    // literal "N suggestions from N ratings" and went red the moment that copy
+    // was cut, reporting a broken recommender that was working perfectly --
+    // a harness that lies in the other direction is still a harness that lies.
+    const m = txt.match(/(\d+) from (\d+) rating/);
     if (!m || Number(m[1]) === 0) note("recommender", "rated 5 titles and got no suggestions");
     else ok("recommender (" + m[0] + ")");
     // swipe mode must respond to the keyboard, not just to clicks
@@ -156,6 +160,101 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       const n = await p.evaluate(() => document.querySelectorAll('img[alt^="Poster for"]').length);
       if (n === 0) note("search-case", `lowercase "${q}" returned nothing`);
       else ok(`search lowercase "${q}" (${n})`);
+    }
+    await p.close();
+  }
+
+  // Every check below exists because the thing it asserts was BROKEN on
+  // 2026-08-04 while this suite ran green. That is the rule: after an escaped
+  // defect, add the assertion that would have caught it.
+  console.log("\n[6c] the defects THIS session produced");
+  {
+    const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(17000);
+
+    // 1. QUERIES MUST RESOLVE, NOT JUST NOT-ERROR. A `genres.value` unnest in
+    // the recommendation query never returned in DuckDB-WASM; because the
+    // dashboard runs one query queue, EVERY control on the page came up empty
+    // with no error and `loading` stuck true. The genre chips and the timeline
+    // bars are the cheapest queries on the page, so if they are empty the
+    // queue is wedged.
+    const controls = await p.evaluate(() => {
+      // the count sits in a nested span with NO separator, so the chip reads
+      // "Drama14K" -- an anchored /Drama\s/ matched nothing and reported a
+      // wedged queue over a working page
+      const chips = [...document.querySelectorAll("button")].map((b) => (b.textContent || "").trim());
+      const bars = document.querySelectorAll('div[title*="films"]').length;
+      return { genres: chips.filter((t) => /^(Drama|Comedy|Action|Horror)\d/.test(t)).length, bars };
+    });
+    if (controls.genres < 4) note("query-queue", `genre chips did not populate (${controls.genres}) - the query queue is wedged`);
+    else ok(`genre chips populate (${controls.genres} of the known 4)`);
+    if (controls.bars < 10) note("query-queue", `timeline drew ${controls.bars} bars`);
+    else ok(`timeline populates (${controls.bars} bars)`);
+
+    // 2. COLD START. CHARTER §4: a defensible list from ZERO input. The
+    // previous fix for "'Your next watch' is useless with no ratings" deleted
+    // the section, which answers the complaint and breaks the charter.
+    const cold = await p.evaluate(() => {
+      const t = document.body.innerText;
+      // "Open <title>" is the aria-label of the tile WRAPPER; the <img> inside
+      // carries "Poster for <title>". Selecting the img by the wrapper's label
+      // counted zero over a full list.
+      return { labelled: /top rated/.test(t), tiles: document.querySelectorAll('div[aria-label^="Open "]').length };
+    });
+    if (!cold.labelled) note("cold-start", "the zero-rating list is not labelled for what it is");
+    else if (cold.tiles < 10) note("cold-start", `only ${cold.tiles} titles with nothing rated`);
+    else ok(`cold start lists ${cold.tiles} titles, honestly labelled`);
+
+    // 3. EXPORT. CHARTER §1: "a list you cannot take with you was not delivered."
+    const exp = await p.evaluate(() =>
+      [...document.querySelectorAll("button")].filter((b) => /^Copy (link|list)$/.test(b.textContent)).length);
+    if (exp < 2) note("export", `${exp} of 2 copy buttons present`);
+    else ok("list is exportable (copy link + copy list)");
+
+    // 4. THE SWIPE MUST SWIPE, and the card must be BIG and ON SCREEN. It was
+    // two buttons with tick glyphs; then it was 720px tall opening below the
+    // fold, which is the same as invisible.
+    await p.getByRole("button", { name: "Swipe" }).click();
+    await p.waitForTimeout(1500);
+    await p.getByRole("button", { name: "Films" }).click();
+    await p.waitForTimeout(3500);
+    const geom = await p.evaluate(() => {
+      const c = document.querySelector('div[style*="aspect-ratio"]');
+      if (!c) return null;
+      const r = c.getBoundingClientRect();
+      return { h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom), vh: window.innerHeight };
+    });
+    if (!geom) note("swipe-card", "no card rendered");
+    else {
+      if (geom.h < geom.vh * 0.55) note("swipe-card", `card is ${geom.h}px of a ${geom.vh}px viewport, not nearly full screen`);
+      else ok(`card is ${geom.h}px of ${geom.vh} (nearly full screen)`);
+      if (geom.top < 0 || geom.bottom > geom.vh + 2) note("swipe-card", `card runs off screen (${geom.top}..${geom.bottom} of ${geom.vh})`);
+      else ok("card sits fully on screen");
+    }
+    // the affordance must be readable BEFORE the first click
+    const hints = await p.evaluate(() =>
+      [...document.querySelectorAll("span")].filter((s) => /^(✕ No|Yes ✓)$/.test(s.textContent.trim())).length);
+    if (hints < 2) note("swipe-affordance", `${hints} of 2 half-labels visible before the first click`);
+    else ok("both click-half labels are visible up front");
+
+    if (geom) {
+      const cx = (geom.top + geom.bottom) / 2;
+      const card = p.locator('div[style*="aspect-ratio"]').first();
+      const bb = await card.boundingBox();
+      await p.mouse.move(bb.x + bb.width / 2, cx); await p.mouse.down();
+      for (let i = 1; i <= 8; i++) { await p.mouse.move(bb.x + bb.width / 2 + i * 25, cx); await p.waitForTimeout(20); }
+      await p.mouse.up();
+      await p.waitForTimeout(2500);
+      const liked = await p.evaluate(() => /1 liked/.test(document.body.innerText));
+      if (!liked) note("swipe-drag", "dragging the card right did not record a like");
+      else ok("drag right records a like");
+
+      await p.mouse.click(bb.x + bb.width * 0.25, cx);
+      await p.waitForTimeout(2500);
+      const disliked = await p.evaluate(() => /1 not for you/.test(document.body.innerText));
+      if (!disliked) note("swipe-halves", "clicking the left half did not record a dislike");
+      else ok("clicking a half records a verdict");
     }
     await p.close();
   }
