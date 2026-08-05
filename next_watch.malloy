@@ -57,6 +57,12 @@ given:
   // their filmography is NOT marked as liked.
   # label="Liked people"
   LIKED_PEOPLE :: filter<string> is f'__none__'
+  // CHARTER F5: "A disliked actor is a strong negative and should be treated as
+  // one." It was not treated as anything at all — a left swipe on a person set
+  // local state and reached neither the model nor the screen, so the deck's
+  // DEFAULT mode silently discarded half of every verdict it collected.
+  # label="Disliked people"
+  DISLIKED_PEOPLE :: filter<string> is f'__none__'
   // GENRE and RELEASE_YEAR are UPSTREAM'S, defined in imdb.malloy and already
   // driving his genre-pairs page. Reused rather than redefined so both pages
   // filter identically and a fork user is not learning two behaviours.

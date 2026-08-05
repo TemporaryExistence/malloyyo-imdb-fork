@@ -225,6 +225,17 @@ query: recommendations_by_person is scoring -> {
   limit: 60
 }
 
+#" Titles carrying a person the visitor swiped LEFT on
+// CHARTER F5 calls a disliked actor "a strong negative". The strongest honest
+// reading of that, and the one that cannot fail quietly, is exclusion: the UI
+// removes these titles from the list outright. Same shape as
+// `recommendations_by_person`, so it inherits the same no-unnest discipline.
+query: titles_by_disliked_people is scoring -> {
+  where: feature ~ $DISLIKED_PEOPLE
+  group_by: tconst
+  limit: 2000
+}
+
 // --- filters, matching what upstream's own pages offer ----------------------
 #" Genres to filter by
 query: nw_genre_options is movies -> {

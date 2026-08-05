@@ -377,7 +377,15 @@ function Badge({ color, ch }) {
 // dimension "nearly full screen" can mean here, and it should use all of it.
 // The ceiling is what still leaves room for the title and the skip button
 // beneath without pushing them under the fold (see the scroll-into-view note).
-const CARD_H = "min(82vh, 820px)";
+// Desktop and mobile need different answers to "nearly full screen", and using
+// one number regressed mobile: at 82vh a 390x844 phone put the card's own TITLE,
+// the "Not seen" button and the disclaimer BELOW THE FOLD — a card sized to fill
+// the screen that pushes its own controls off it. On a phone the card is already
+// ~92% of the WIDTH, which is the near-full-bleed the complaint was about; the
+// height has to leave room for the rest of the stage. Both values are measured
+// against the rendered page, not chosen.
+const CARD_H_WIDE = "min(82vh, 820px)";
+const CARD_H_NARROW = "min(68vh, 560px)";
 
 // Inline styles cannot carry a media query, and flex-wrap alone put the ✕
 // ABOVE the card and the ✓ off the bottom of the screen at 390px. So the
@@ -510,7 +518,7 @@ function SwipeStage({ ink, kind, image, title, subtitle, meta, mark, onLike, onD
             setHover(e.clientX - r.left < r.width / 2 ? "left" : "right");
           }}
           style={{
-            position: "relative", height: CARD_H, aspectRatio: "2 / 3", maxWidth: "min(92vw, 560px)",
+            position: "relative", height: narrow ? CARD_H_NARROW : CARD_H_WIDE, aspectRatio: "2 / 3", maxWidth: "min(92vw, 560px)",
             margin: "0 auto", borderRadius: 10, overflow: "hidden", background: ink.track,
             border: `1px solid ${ink.track}`, cursor: "grab", touchAction: "none", userSelect: "none",
             transform: `translate(${dx}px, ${dy}px) rotate(${lean * 7}deg)`,
@@ -576,6 +584,7 @@ export default function Dashboard({ dashboard, givens }) {
   const gName = useGiven("NAME");
   const gPerson = useGiven("PERSON_EXACT");
   const gLikedPeople = useGiven("LIKED_PEOPLE");
+  const gDislikedPeople = useGiven("DISLIKED_PEOPLE");
   const gDetail = useGiven("DETAIL_ID");
 
   // verdicts: tconst -> 'up' | 'down'. The single source of truth for the UI;
@@ -624,6 +633,7 @@ export default function Dashboard({ dashboard, givens }) {
   const people = useQuery({ query: "search_people", givens });
   const seedPeople = useQuery({ query: "seed_people_typed", givens });
   const popular = useQuery({ query: "popular_picks", givens });
+  const vetoed = useQuery({ query: "titles_by_disliked_people", givens });
   const genreOpts = useQuery({ query: "nw_genre_options", givens });
   const periodsQ = useQuery({ query: "nw_periods", givens });
   const gGenre = useGiven("GENRE");
@@ -655,9 +665,19 @@ export default function Dashboard({ dashboard, givens }) {
   const [peopleVerdicts, setPeopleVerdicts] = React.useState({});
   const likedPeople = React.useMemo(
     () => Object.keys(peopleVerdicts).filter((k) => peopleVerdicts[k] === "up"), [peopleVerdicts]);
+  // ⛔ A LEFT SWIPE ON A PERSON USED TO GO NOWHERE. Only the liked set was ever
+  // pushed into a given, so in the deck's DEFAULT mode half of every verdict the
+  // visitor gave was silently discarded — the counter did not move and the list
+  // did not change. CHARTER F5: "A disliked actor is a strong negative and
+  // should be treated as one."
+  const dislikedPeople = React.useMemo(
+    () => Object.keys(peopleVerdicts).filter((k) => peopleVerdicts[k] === "down"), [peopleVerdicts]);
   React.useEffect(() => {
     gLikedPeople.set(filters.oneOf(...(likedPeople.length ? likedPeople : ["__none__"])));
   }, [likedPeople.join(",")]);
+  React.useEffect(() => {
+    gDislikedPeople.set(filters.oneOf(...(dislikedPeople.length ? dislikedPeople : ["__none__"])));
+  }, [dislikedPeople.join(",")]);
 
   // availability indexed by title, so a tile lookup is O(1) not a scan
   // one row per title now: logos are a pipe-joined string
@@ -699,11 +719,17 @@ export default function Dashboard({ dashboard, givens }) {
     return out;
   }, [seeds.rows]);
 
+  // One history stack for BOTH card types. It used to hold title verdicts only,
+  // so the deck's DEFAULT mode — people — had no Undo at all, while Films and
+  // Shows did. CHARTER F5 lists Undo under "Design rules that are not optional",
+  // and a mis-swipe there is the most expensive kind: one person card touches
+  // every title they are in.
   const rate = (tconst, v) => {
-    setHistory((h) => [...h, { tconst, prev: verdicts[tconst] ?? null }]);
+    setHistory((h) => [...h, { kind: "title", id: tconst, prev: verdicts[tconst] ?? null }]);
     setVerdicts((s) => { const n = { ...s }; if (v == null) delete n[tconst]; else n[tconst] = v; return n; });
   };
   const ratePerson = (nconst, v) => {
+    setHistory((h) => [...h, { kind: "person", id: nconst, prev: peopleVerdicts[nconst] ?? null }]);
     setPeopleVerdicts((s) => ({ ...s, [nconst]: v }));
   };
 
@@ -711,8 +737,13 @@ export default function Dashboard({ dashboard, givens }) {
     setHistory((h) => {
       if (!h.length) return h;
       const last = h[h.length - 1];
-      setVerdicts((s) => { const n = { ...s }; if (last.prev == null) delete n[last.tconst]; else n[last.tconst] = last.prev; return n; });
-      setDeck((d) => Math.max(0, d - 1));
+      const restore = (s) => {
+        const n = { ...s };
+        if (last.prev == null) delete n[last.id]; else n[last.id] = last.prev;
+        return n;
+      };
+      if (last.kind === "person") setPeopleVerdicts(restore);
+      else { setVerdicts(restore); setDeck((d) => Math.max(0, d - 1)); }
       return h.slice(0, -1);
     });
   };
@@ -735,9 +766,15 @@ export default function Dashboard({ dashboard, givens }) {
     return Array.isArray(g) ? g.includes(genreNow) : String(g || "").includes(genreNow);
   }, [genreNow]);
 
+  // Titles carrying a person the visitor swiped LEFT on. CHARTER F5 calls a
+  // disliked actor "a strong negative"; exclusion is the strongest honest
+  // reading and the one that cannot fail quietly.
+  const veto = React.useMemo(
+    () => new Set((vetoed.rows || []).map((r) => r.tconst)), [vetoed.rows]);
+
   const recommended = React.useMemo(() => {
     let rows = (recs.rows || [])
-      .filter((r) => !verdicts[r.tconst])
+      .filter((r) => !verdicts[r.tconst] && !veto.has(r.tconst))
       .filter(inGenre)
       // TWO shared people, full stop. The earlier `>= 2 people OR >= 2 genres`
       // let everything through -- with only 29 genres almost any pair of films
@@ -806,7 +843,7 @@ export default function Dashboard({ dashboard, givens }) {
     // against the genre profile and must not outrank things that were.
     const seen = new Set(rows.map((r) => r.tconst));
     const byPerson = (recsPeople.rows || [])
-      .filter((r) => !verdicts[r.tconst] && !seen.has(r.tconst) && inGenre(r))
+      .filter((r) => !verdicts[r.tconst] && !seen.has(r.tconst) && !veto.has(r.tconst) && inGenre(r))
       .map((r) => ({ ...r, _score: -1, shared_crew: 0, shared_cast: 0 }));
     rows = rows.concat(byPerson);
 
@@ -821,11 +858,14 @@ export default function Dashboard({ dashboard, givens }) {
       if (perDir[d] <= 2) out.push(r);
     }
     return out;
-  }, [recs.rows, recsPeople.rows, verdicts]);
+  }, [recs.rows, recsPeople.rows, verdicts, veto, inGenre, liked.length]);
 
   // people count as ratings: swiping right on an actor is a real signal and
   // the list must fill from it alone, or the person cards look decorative
-  const rated = liked.length + disliked.length + likedPeople.length;
+  // A disliked person counts as a rating: it is a verdict the visitor gave, and
+  // leaving it out of `rated` is what let the whole left-swipe path read as
+  // "nothing rated yet" after several deliberate swipes.
+  const rated = liked.length + disliked.length + likedPeople.length + dislikedPeople.length;
 
   // THE COLD START. Andrew: "'Your next watch' is useless if people haven't
   // selected any ratings yet." The previous fix hid the section at zero
@@ -1000,6 +1040,16 @@ export default function Dashboard({ dashboard, givens }) {
     reader.readAsText(file);
   };
 
+  // Escape closes the detail modal. It did, then stopped when the swipe deck
+  // took over the keydown listener, which turns a modal into a trap for anyone
+  // not using a mouse. Bound separately from the deck so the two cannot fight.
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") setOpen(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
   // keyboard: swipe mode must not require a mouse or a touchscreen
   React.useEffect(() => {
     if (mode !== "swipe") return;
@@ -1007,6 +1057,7 @@ export default function Dashboard({ dashboard, givens }) {
       // Guarding on `card` first meant the keyboard went dead on a PERSON card
       // whenever the title pool happened to be empty -- the person deck was
       // fully populated and the arrow keys did nothing.
+      if (open) return; // a modal is up; its own handler owns the keyboard
       if (!card && !usePersonCard) return;
       if (usePersonCard) {
         if (e.key === "ArrowRight") ratePerson(personCard.nconst, "up");
@@ -1062,9 +1113,10 @@ export default function Dashboard({ dashboard, givens }) {
           <Chip on={mode === "swipe"} onClick={() => setMode("swipe")}>Swipe</Chip>
           <Chip on={mode === "search"} onClick={() => setMode("search")}>Search</Chip>
           <span style={{ marginLeft: 8, fontSize: 12, color: ink.muted, fontVariantNumeric: "tabular-nums" }}>
-            {rated || likedPeople.length
+            {rated
               ? `${liked.length} liked · ${disliked.length} not for you`
-                + (likedPeople.length ? ` · ${likedPeople.length} people` : "")
+                + (likedPeople.length || dislikedPeople.length
+                    ? ` · ${likedPeople.length + dislikedPeople.length} people` : "")
               : "nothing rated yet"}
           </span>
           {history.length > 0 && (

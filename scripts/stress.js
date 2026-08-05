@@ -342,6 +342,81 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     await p.close();
   }
 
+  // The suite was GREEN over every one of these. `grep -i undo` returned zero
+  // hits, nothing asserted that a person dislike was recorded, and the
+  // card-on-screen check ran at 1440x900 only — never at the width where it
+  // overflowed. Extending the suite for the KNOWN list is what let the same
+  // class reopen.
+  console.log("\n[6d] the swipe deck's DEFAULT mode, and the mobile fold");
+  {
+    const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(17000);
+    await p.getByRole("button", { name: "Swipe" }).click();
+    await p.waitForTimeout(2500);
+    const name0 = await p.evaluate(() => {
+      const c = document.querySelector('div[style*="aspect-ratio"]');
+      return c && c.parentElement.children[1] ? c.parentElement.children[1].textContent : "";
+    });
+    // A LEFT SWIPE ON A PERSON REACHED NOTHING: state was set, no given was
+    // written, the counter never moved. Half of every verdict the deck's
+    // default mode collected was discarded in silence.
+    await p.keyboard.press("ArrowLeft");
+    await p.waitForTimeout(4000);
+    let t = await p.evaluate(() => document.body.innerText);
+    if (/nothing rated yet/.test(t)) note("person-dislike", "a left swipe on a person recorded nothing");
+    else if (!/1 people/.test(t)) note("person-dislike", "the disliked person is not counted");
+    else ok("a person dislike registers and is counted");
+    // CHARTER F5 lists Undo under "design rules that are not optional", and the
+    // deck OPENS on People — the one mode that had no Undo at all.
+    if (!/Undo/.test(t)) note("person-undo", "People mode offers no Undo");
+    else {
+      await p.getByRole("button", { name: "Undo" }).click();
+      await p.waitForTimeout(3000);
+      const back = await p.evaluate(() => {
+        const c = document.querySelector('div[style*="aspect-ratio"]');
+        return c && c.parentElement.children[1] ? c.parentElement.children[1].textContent : "";
+      });
+      if (!/nothing rated yet/.test(await p.evaluate(() => document.body.innerText)))
+        note("person-undo", "Undo did not reverse the person verdict");
+      else if (back !== name0) note("person-undo", `Undo did not bring the card back (${back} != ${name0})`);
+      else ok("Undo reverses a person verdict and restores the card");
+    }
+    // A modal with no keyboard exit is a trap.
+    await p.getByRole("button", { name: "Grid" }).click();
+    await p.waitForTimeout(2500);
+    await p.locator('div[aria-label^="Open "]').first().click();
+    await p.waitForTimeout(3500);
+    await p.keyboard.press("Escape");
+    await p.waitForTimeout(1500);
+    if (await p.evaluate(() => /Availability data from/.test(document.body.innerText)))
+      note("modal-escape", "Escape does not close the detail modal");
+    else ok("Escape closes the detail modal");
+    await p.close();
+
+    // THE MOBILE FOLD. Sizing the card to fill the screen pushed the card's own
+    // title, its skip button and its disclaimer BELOW the fold at 390x844.
+    const m = await b.newPage({ viewport: { width: 390, height: 844 } });
+    await m.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await m.waitForTimeout(17000);
+    await m.getByRole("button", { name: "Swipe" }).click();
+    await m.waitForTimeout(4000);
+    const geo = await m.evaluate(() => {
+      const c = document.querySelector('div[style*="aspect-ratio"]');
+      if (!c) return null;
+      const r = c.getBoundingClientRect(), s = c.parentElement.getBoundingClientRect();
+      return { w: Math.round(r.width), bot: Math.round(s.bottom), vh: window.innerHeight, vw: window.innerWidth };
+    });
+    if (!geo) note("mobile-stage", "no card rendered at 390x844");
+    else {
+      if (geo.bot > geo.vh) note("mobile-stage", `the stage runs ${geo.bot - geo.vh}px past the fold (name/skip/disclaimer hidden)`);
+      else ok(`the whole mobile stage fits the fold (${geo.bot} of ${geo.vh})`);
+      if (geo.w < geo.vw * 0.85) note("mobile-stage", `card is only ${Math.round(geo.w / geo.vw * 100)}% of width, not near-full-bleed`);
+      else ok(`the mobile card is near-full-bleed (${Math.round(geo.w / geo.vw * 100)}% of width)`);
+    }
+    await m.close();
+  }
+
   console.log("\n[7] internal links resolve");
   const p = await b.newPage({ viewport: { width: 1440, height: 1000 } });
   await p.goto(BASE + "/index.html", { waitUntil: "networkidle", timeout: 90000 });
