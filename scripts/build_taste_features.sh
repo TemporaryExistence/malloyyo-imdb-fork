@@ -48,10 +48,17 @@ COPY (
     SELECT tconst, nconst FROM 'docs/imdb_principals.parquet'
     WHERE category IN ('actor','actress') AND ordering <= 6
   ),
+  -- IMDb writes an unknown value as the literal string '\\N', which survives
+  -- str_split and became a FEATURE: 431 titles with no credited director or
+  -- writer all appeared to share a crew member with one another, and that
+  -- passes the `shared_crew >= 1` gate -- the primary quality filter -- on
+  -- nothing but missing data. Every feature must be a real nm id.
   crew AS (
-    SELECT tconst, u.n AS nconst FROM t, UNNEST(t.directors) AS u(n) WHERE u.n IS NOT NULL
+    SELECT tconst, u.n AS nconst FROM t, UNNEST(t.directors) AS u(n)
+      WHERE u.n IS NOT NULL AND u.n LIKE 'nm%'
     UNION ALL
-    SELECT tconst, u.n AS nconst FROM t, UNNEST(t.writers) AS u(n) WHERE u.n IS NOT NULL
+    SELECT tconst, u.n AS nconst FROM t, UNNEST(t.writers) AS u(n)
+      WHERE u.n IS NOT NULL AND u.n LIKE 'nm%'
   ),
   n AS (SELECT count(*)::DOUBLE AS n FROM t),
 

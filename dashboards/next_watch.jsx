@@ -167,6 +167,7 @@ export default function Dashboard({ dashboard, givens }) {
   const gTitle = useGiven("TITLE");
   const gName = useGiven("NAME");
   const gPerson = useGiven("PERSON_EXACT");
+  const gLikedPeople = useGiven("LIKED_PEOPLE");
   const gDetail = useGiven("DETAIL_ID");
 
   // verdicts: tconst -> 'up' | 'down'. The single source of truth for the UI;
@@ -208,12 +209,22 @@ export default function Dashboard({ dashboard, givens }) {
 
   const seeds = useQuery({ query: "seed_titles", givens });
   const recs = useQuery({ query: "recommendations", givens });
+  const recsPeople = useQuery({ query: "recommendations_by_person", givens });
   const avail = useQuery({ query: "availability", givens });
   const detail = useQuery({ query: "availability_detail", givens });
   const found = useQuery({ query: "search_titles", givens });
   const people = useQuery({ query: "search_people", givens });
+  const seedPeople = useQuery({ query: "seed_people", givens });
   const personTitles = useQuery({ query: "titles_by_person", givens });
   const [person, setPerson] = React.useState("");
+  // Kept apart from title verdicts on purpose. A liked PERSON raises their
+  // weight in the profile; it never marks their filmography as liked.
+  const [peopleVerdicts, setPeopleVerdicts] = React.useState({});
+  const likedPeople = React.useMemo(
+    () => Object.keys(peopleVerdicts).filter((k) => peopleVerdicts[k] === "up"), [peopleVerdicts]);
+  React.useEffect(() => {
+    gLikedPeople.set(filters.oneOf(...(likedPeople.length ? likedPeople : ["__none__"])));
+  }, [likedPeople.join(",")]);
 
   // availability indexed by title, so a tile lookup is O(1) not a scan
   // one row per title now: logos are a pipe-joined string
@@ -259,6 +270,10 @@ export default function Dashboard({ dashboard, givens }) {
     setHistory((h) => [...h, { tconst, prev: verdicts[tconst] ?? null }]);
     setVerdicts((s) => { const n = { ...s }; if (v == null) delete n[tconst]; else n[tconst] = v; return n; });
   };
+  const ratePerson = (nconst, v) => {
+    setPeopleVerdicts((s) => ({ ...s, [nconst]: v }));
+  };
+
   const undo = () => {
     setHistory((h) => {
       if (!h.length) return h;
@@ -279,7 +294,7 @@ export default function Dashboard({ dashboard, givens }) {
   //  - at most two titles per director, or a strong match returns a filmography
   //    instead of a recommendation.
   const recommended = React.useMemo(() => {
-    const rows = (recs.rows || [])
+    let rows = (recs.rows || [])
       .filter((r) => !verdicts[r.tconst])
       // TWO shared people, full stop. The earlier `>= 2 people OR >= 2 genres`
       // let everything through -- with only 29 genres almost any pair of films
@@ -304,6 +319,15 @@ export default function Dashboard({ dashboard, givens }) {
               + num(r.average_rating) * 0.004,
       }))
       .sort((a, b) => b._score - a._score);
+    // Titles carried in by a liked PERSON, appended after the feature-scored
+    // ones. They earn their place on the person alone, so they are not scored
+    // against the genre profile and must not outrank things that were.
+    const seen = new Set(rows.map((r) => r.tconst));
+    const byPerson = (recsPeople.rows || [])
+      .filter((r) => !verdicts[r.tconst] && !seen.has(r.tconst))
+      .map((r) => ({ ...r, _score: -1, shared_crew: 0, shared_cast: 0 }));
+    rows = rows.concat(byPerson);
+
     const perDir = {};
     const out = [];
     for (const r of rows) {
@@ -315,9 +339,11 @@ export default function Dashboard({ dashboard, givens }) {
       if (perDir[d] <= 2) out.push(r);
     }
     return out;
-  }, [recs.rows, verdicts]);
+  }, [recs.rows, recsPeople.rows, verdicts]);
 
-  const rated = liked.length + disliked.length;
+  // people count as ratings: swiping right on an actor is a real signal and
+  // the list must fill from it alone, or the person cards look decorative
+  const rated = liked.length + disliked.length + likedPeople.length;
 
   // ADAPTIVE DECK. A fixed sequence stops informing after a handful of swipes:
   // if someone has liked three action films, a fourth teaches almost nothing.
@@ -330,6 +356,16 @@ export default function Dashboard({ dashboard, givens }) {
     for (const r of pool) if (verdicts[r.tconst] && r.genre) c[r.genre] = (c[r.genre] || 0) + 1;
     return c;
   }, [pool, verdicts]);
+
+  // People cards come FIRST while we know nothing: one swipe on an actor
+  // touches every title they are in, where a film swipe touches one. Once a
+  // few are down, titles are the finer instrument (CHARTER F5).
+  const personCard = React.useMemo(() => {
+    const rows = (seedPeople.rows || []).filter((r) => r.nconst && !peopleVerdicts[r.nconst]);
+    return rows.length ? rows[0] : null;
+  }, [seedPeople.rows, peopleVerdicts]);
+
+  const usePersonCard = Object.keys(peopleVerdicts).length < 4 && personCard;
 
   const card = React.useMemo(() => {
     const unrated = pool.filter((r) => !verdicts[r.tconst]);
@@ -350,6 +386,12 @@ export default function Dashboard({ dashboard, givens }) {
     if (mode !== "swipe") return;
     const onKey = (e) => {
       if (!card) return;
+      if (usePersonCard) {
+        if (e.key === "ArrowRight") ratePerson(personCard.nconst, "up");
+        else if (e.key === "ArrowLeft") ratePerson(personCard.nconst, "down");
+        else if (e.key === "ArrowUp" || e.key === " ") ratePerson(personCard.nconst, "skip");
+        return;
+      }
       if (e.key === "ArrowRight") { rate(card.tconst, "up"); setDeck((d) => d + 1); }
       else if (e.key === "ArrowLeft") { rate(card.tconst, "down"); setDeck((d) => d + 1); }
       else if (e.key === "ArrowUp" || e.key === " ") { card._shown = (card._shown || 0) + 1; setDeck((d) => d + 1); }
@@ -357,7 +399,7 @@ export default function Dashboard({ dashboard, givens }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mode, card, verdicts]);
+  }, [mode, card, verdicts, usePersonCard, personCard]);
 
   const Chip = ({ on, onClick, children }) => (
     <button type="button" onClick={onClick}
@@ -388,7 +430,10 @@ export default function Dashboard({ dashboard, givens }) {
           <Chip on={mode === "swipe"} onClick={() => setMode("swipe")}>Swipe</Chip>
           <Chip on={mode === "search"} onClick={() => setMode("search")}>Search</Chip>
           <span style={{ marginLeft: 8, fontSize: 12, color: ink.muted, fontVariantNumeric: "tabular-nums" }}>
-            {rated ? `${liked.length} liked · ${disliked.length} not for you` : "nothing rated yet"}
+            {rated || likedPeople.length
+              ? `${liked.length} liked · ${disliked.length} not for you`
+                + (likedPeople.length ? ` · ${likedPeople.length} people` : "")
+              : "nothing rated yet"}
           </span>
           {history.length > 0 && (
             <button type="button" onClick={undo}
@@ -417,7 +462,42 @@ export default function Dashboard({ dashboard, givens }) {
           <div style={{ fontSize: 12, color: ink.muted, marginBottom: 10 }}>
             Left is no, right is yes, up is \u201chaven\u2019t seen it\u201d. Arrow keys work too.
           </div>
-          {card ? (
+          {usePersonCard ? (
+            <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+              <button type="button" aria-label={`Not a favourite: ${personCard.person}`}
+                onClick={() => ratePerson(personCard.nconst, "down")}
+                style={{ font: "inherit", cursor: "pointer", border: `1px solid ${ink.track}`,
+                         background: ink.surface, color: BAD, borderRadius: 8, padding: "60px 16px",
+                         fontSize: 22, fontWeight: 700 }}>✕</button>
+              <div style={{ width: TILE_W * 2, textAlign: "center" }}>
+                <div style={{ height: 300, borderRadius: 8, border: `1px solid ${ink.track}`,
+                              background: ink.track, display: "flex", flexDirection: "column",
+                              alignItems: "center", justifyContent: "center", padding: 16 }}>
+                  <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase",
+                                color: ink.muted, fontWeight: 700, marginBottom: 8 }}>Person</div>
+                  <div style={{ fontSize: 20, fontWeight: 680, color: ink.text, lineHeight: 1.2 }}>
+                    {personCard.person}
+                  </div>
+                  <div style={{ fontSize: 12, color: ink.muted, marginTop: 6 }}>
+                    {Math.round(num(personCard.titles))} titles here
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: ink.muted, marginTop: 8 }}>
+                  Do you seek their work out? This raises their weight - it does not assume you liked
+                  everything they are in.
+                </div>
+                <button type="button" onClick={() => ratePerson(personCard.nconst, "skip")}
+                  style={{ marginTop: 10, font: "inherit", fontSize: 12, cursor: "pointer",
+                           padding: "5px 10px", borderRadius: 7, background: ink.surface,
+                           color: ink.text2, border: `1px solid ${ink.track}` }}>No opinion</button>
+              </div>
+              <button type="button" aria-label={`Favourite: ${personCard.person}`}
+                onClick={() => ratePerson(personCard.nconst, "up")}
+                style={{ font: "inherit", cursor: "pointer", border: `1px solid ${ink.track}`,
+                         background: ink.surface, color: GOOD, borderRadius: 8, padding: "60px 16px",
+                         fontSize: 22, fontWeight: 700 }}>✓</button>
+            </div>
+          ) : card ? (
             <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
               <button type="button" aria-label="Did not like"
                 onClick={() => { rate(card.tconst, "down"); setDeck((d) => d + 1); }}

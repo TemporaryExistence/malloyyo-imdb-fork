@@ -53,6 +53,10 @@ given:
   // lowercased search term
   # label="Person"
   PERSON_EXACT :: filter<string> is f'__none__'
+  // people the visitor swiped right on. Their weight rises in the profile;
+  // their filmography is NOT marked as liked.
+  # label="Liked people"
+  LIKED_PEOPLE :: filter<string> is f'__none__'
 
 // Availability, keyed by title. Every row carries JustWatch's attribution
 // because TMDB requires the credit on each media item, not once in a footer.

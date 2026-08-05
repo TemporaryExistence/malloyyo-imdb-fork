@@ -18,6 +18,10 @@ query: recommendations is scoring -> {
   // Exclusion of the already-rated happens in the UI, not here: `not (x ~ $G)`
   // silently returned zero rows for every input, and a filter that quietly
   // matches nothing is worse than one that is absent.
+  // Kept as a single condition on the join leg. An `OR` across the join field
+  // and the candidate field returned ZERO rows for every input -- Malloy cannot
+  // push a join-side filter through a disjunction, and the failure was silent.
+  // Liked PEOPLE are a separate query (below), merged in the UI.
   where:
     liked_side.tconst ~ $LIKED
     and title.numVotes ~ $MIN_VOTES
@@ -146,4 +150,52 @@ query: titles_by_person is movies -> {
     poster is movie_image
   order_by: num_votes desc
   limit: 40
+}
+
+// --- people as swipe cards (CHARTER F5) --------------------------------------
+// An actor card is a COARSE, high-leverage signal: one swipe touches every title
+// they are in, where a film swipe touches one. So the deck mixes card types and
+// opens with people while the profile is still empty.
+// ⚠ Liking a person raises THEIR weight; it does not mark their filmography as
+// liked. Conflating the two would recommend the worst film of a favourite
+// actor's career and call it a match.
+#" Well-known people to swipe on
+query: seed_people is movies -> {
+  // ONLY roles that exist in taste_features (actor/actress -> cast,
+  // director/writer -> crew). The first version grouped over every principal,
+  // so the deck opened on Hans Zimmer -- a composer, who carries no feature at
+  // all, meaning the swipe changed nothing. A card that cannot affect the
+  // result is worse than no card.
+  where: numVotes > 200000
+     and principals.category = 'actor' | 'actress' | 'director' | 'writer'
+  group_by: person is name, nconst is principals.nconst
+  aggregate:
+    titles is title_count
+    total_ratings
+  order_by: total_ratings desc
+  limit: 120
+}
+
+#" Titles carrying a person the visitor swiped right on
+// Separate from `recommendations` on purpose: see the OR note there. One swipe
+// on an actor touches every title they are in, so this needs no join at all.
+query: recommendations_by_person is scoring -> {
+  where:
+    feature ~ $LIKED_PEOPLE
+    and title.numVotes ~ $MIN_VOTES
+    and title.titleType ~ $TITLE_TYPE
+  group_by:
+    tconst
+    primary_title is title.primaryTitle
+    title_type is title.titleType
+    start_year is title.startYear
+    average_rating is title.averageRating
+    num_votes is title.numVotes
+    director is title.directors
+    poster is pick null when poster.poster_path is null
+      else concat('https://image.tmdb.org/t/p/w154', poster.poster_path)
+  aggregate:
+    person_hits is count()
+  order_by: num_votes desc
+  limit: 60
 }
