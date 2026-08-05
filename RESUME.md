@@ -1,105 +1,74 @@
-# RESUME HERE — malloyyo-imdb-fork (2026-08-04 shutdown)
+# RESUME HERE — malloyyo-imdb-fork (updated 2026-08-04, session 4)
 
-**Read this first, then `CHARTER.md`. Do not start new work until the list in §3 is done.**
-
----
-
-## 1. ANDREW'S VERDICT: "You're like 30% done."
-
-He reviewed the live site and rejected it. His words, verbatim — treat each as a defect, not a preference:
-
-1. **"There is no picture of the actor."**
-2. **"The picture should be nearly full screen."**
-3. **"There is no way to switch to movies/shows, only actors for the like/dislike Tinder mode."**
-4. **"'Your next watch' is useless if people haven't selected any ratings yet."**
-5. **"You were overly verbose in the page text, AS ALWAYS. So annoying."** ← a REPEAT failure across sessions. Cut copy to the bone before he sees anything.
-6. **"You didn't build all the features I asked for."**
-7. **"The 'your next watch' page doesn't allow you to sort by year in the way Lloyd's original does or select genres to filter by."**
-8. **"You seem to have missed the whole point."**
-
-Plus a bug he did not have to mention: the swipe caption rendered **literal escape sequences**
-(`“haven’t seen it”`) because a python replacement wrote them into the JSX as text.
-
-**The lesson to carry in: he judges the RENDERED PAGE.** Screenshots of it were taken this session and
-still missed all of the above, because the checks asserted "does it populate", never "is this good".
+**Read this first, then `CHARTER.md`.**
 
 ---
 
-## 2. EXACT STATE AT SHUTDOWN
+## 1. STATUS: Andrew's eight rejections are all addressed. Nothing is pushed.
 
-### Pushed and live
-`https://temporaryexistence.github.io/malloyyo-imdb-fork/` — last pushed commit `81cd348`.
-**Everything below is UNCOMMITTED and NOT BUNDLED.** The live site does NOT have it.
+Commit `d390661` is **local only**. The live site is still `81cd348` and does **not** have any of
+this. Publishing is Andrew's (CHARTER §5) and the site auto-deploys on push.
 
-### Uncommitted work in the tree (compiles, `malloyyo lint` green, never bundled or seen)
-- `dashboards/next_watch.malloy` — added `nw_genre_options`, `nw_periods`, `seed_people_typed`;
-  `RELEASE_YEAR` declared dashboard-local (upstream does the same); recommendation + seed queries now
-  filter on `$GENRE` and `$RELEASE_YEAR`.
-- `dashboards/next_watch.jsx` — **Lloyd's real `GenrePicker` and `Timeline` components copied verbatim**
-  from `genre_pairs.jsx` and wired; swipe **People / Films / Shows** toggle added; literal-escape bug
-  fixed; copy cut; the zero-ratings "Your next watch" block removed entirely.
-- `next_watch.malloy`, `storage.malloy`, `index.malloy` — `person_images` source registered.
-- `scripts/fetch_person_images.py` — NEW, resolves `nm…` → TMDB `profile_path`.
+| # | His words | State |
+|---|---|---|
+| 1 | "There is no picture of the actor." | **Done.** `person_images.parquet` = 13,560 people, 11,762 portraits; all 150 in the deck have one. |
+| 2 | "The picture should be nearly full screen." | **Done.** 74vh (was a 206px tile), and it scrolls into view. |
+| 3 | "No way to switch to movies/shows, only actors." | **Done.** People / Films / Shows toggle, verified by clicking it. |
+| 4 | "'Your next watch' is useless if people haven't selected any ratings." | **Done**, without breaking §4's cold-start rule. |
+| 5 | "Overly verbose page text, AS ALWAYS." | **Done.** Every rendered string re-read and cut; longest is 9 words. |
+| 6 | "You didn't build all the features I asked for." | **Done.** Export/share (a §1 success criterion, never built) + F4's provider marks. |
+| 7 | "Doesn't allow you to sort by year or select genres to filter by." | **Done.** Genre picker + timeline, asserted to actually filter. |
+| 8 | "You seem to have missed the whole point." | **Done.** Swipe mode was two buttons; it is now a real drag. |
 
-### ⚠ A BACKGROUND JOB WAS KILLED MID-RUN
-`scripts/fetch_person_images.py` was at **~8,500 / 13,560** people when the session ended.
-`docs/data/person_images.parquet` is **incomplete or absent**. It resumes safely — it reads existing rows
-and fetches only the gap:
+---
+
+## 2. THE ROOT CAUSE OF "30% DONE"
+
+Last session's work compiled, linted green, and was **never bundled**. It contained
+`title.genres.value ~ $GENRE` in the recommendation query — an unnest across a source already
+fanned out one row per (candidate feature × liked title). 3.1s → 60s+ locally; in DuckDB-WASM it
+**never returned**. The dashboard runs one query queue, so that single hang left **every** control
+on the page empty, with no error and `loading` stuck true.
+
+⛔ **Do not put `genres.value` (or any unnest) in a where-clause on the `scoring` source.** The
+block comment on that query says so. Genre is carried out as a plain list column and filtered in JS.
+
+---
+
+## 3. WHAT IS ACTUALLY VERIFIED (not "it compiled")
+
+- `scripts/stress.js` — full adversarial suite, **green**, now with a `[6c]` section holding a check
+  for every defect this session produced (query-queue wedge, cold start, export, card size,
+  card-on-screen, affordance visible, drag, click-halves).
+- Filter assertions: Horror changes the grid; a timeline click puts **every** visible year inside
+  the selected range.
+- Gesture assertions: drag right/left, sub-threshold drag records nothing, click-halves, swipe-up
+  skip, undo.
+- Read as images at 1440×900, 1440×1200, 390×844 and dark mode.
+- Cold start measured in the browser: 28 titles, **14 film / 14 TV**.
+
+## 4. THE ONE PROCESS STEP NOT RUN
+
+**The context-isolated rater gate (CHARTER §5) has NOT run this session** — this agent is not
+spawning subagents. Run it before showing Lloyd anything:
 ```
-cd /home/andrew/Project/work/products/malloyyo-imdb-fork && export PATH="/home/andrew/.local/bin:$PATH" && TMDB_API_KEY="$(cat /home/andrew/.config/work/secrets/tmdb-read-token)" python3 scripts/fetch_person_images.py
+/run-rater
 ```
 
-### Data already built and committed
-24,052 titles (18,965 film / 5,087 TV) · posters 24,006 · **220,963 US watch offers over 21,509 titles** ·
-taste features 167k rows (genre / cast / crew, with per-title norms).
+## 5. STILL OPEN
 
----
+- **Ratings-CSV import** — cut, and the build order (§2A item 8) explicitly permits it.
+- The recommender with **zero title ratings and only people liked** returns "every title carrying
+  those people, most-voted first". Correct and documented, but it reads generic. Worth revisiting.
+- Nothing has been proposed upstream. §6.2: not until Lloyd asks.
 
-## 3. WHAT TO DO, IN ORDER
+## 6. HOW TO WORK ON THIS
 
-1. **Finish the person-image fetch** (command above). Then wire the photo into the person card:
-   join `person_images` in `seed_people_typed`, emit
-   `concat('https://image.tmdb.org/t/p/w342', profile_path)`, and render it as the card's image.
-2. **Make the swipe card nearly full screen** — currently a ~206px box. Target roughly `min(70vh, …)`
-   for the image, with the ✕ / ✓ controls flanking it and the title beneath. This applies to BOTH the
-   person card and the title card.
-3. **Bundle, screenshot, and LOOK at it** before anything else:
-   `npx --no-install malloyyo dashboard bundle --out docs --title "malloyyo-imdb-fork" --duckdb bundled --no-serve`
-   then `node scripts/shot.js next_watch <path> 1400` and READ the png.
-4. **Re-read every string on the page and cut it again.** Complaint 5 is a repeat offence.
-5. **Verify the genre picker and timeline actually filter** the grid, the swipe deck and the results —
-   they are wired but have NEVER been rendered or clicked.
-6. **Then** re-run `node scripts/stress.js` and the rater.
-
-### Still unbuilt from the charter
-- Provider marks on `works_together` — recorded as a deliberate cut (that page has no custom component;
-  adding them means replacing Lloyd's renderer, which the style ruling forbids). **Re-open this** given
-  complaint 6; it may be one of the "features I asked for".
-- Ratings-CSV import — charter permits cutting.
-- **Re-read the charter's F1–F6 line by line against the built page.** Complaint 6 says something is
-  missing and the specific item was never named.
-
----
-
-## 4. HOW TO WORK ON THIS
-
-- **Servers:** local site on `http://127.0.0.1:8810` (`scratchpad/serve-fork.py`); it will be dead after a
-  restart — restart it before screenshotting.
-- **Push:** `bash scripts/push.sh` — the harness blocks a bare `git push`; this button is authorised and
-  refuses on detached HEAD, an upstream remote, or a tracked credential path.
-- **Screenshots:** `scripts/shot.js` waits for real content. Headless Chrome AND Firefox both capture
-  before the WASM query returns, so a plain `--screenshot` photographs an empty page.
-- **Skill:** `work/.claude/skills/data-site` holds every trap this stack produces. Load it.
-- **Style ruling:** match Lloyd's visual system exactly; never import our house style. "Better means MORE,
-  not DIFFERENT."
-- **Malloy traps that cost time this session** (all silent): an empty given matches EVERYTHING;
-  `not (x ~ $G)` returns zero rows; `OR` across a join field and a candidate field returns zero rows; the
-  runtime caps results at 5,000 rows whatever `limit` says.
-
----
-
-## 5. THE ONE THING NOT TO REPEAT
-
-Every serious bug this session **printed a plausible result instead of failing**, and every green test
-suite missed them. Before showing him anything: bundle it, screenshot it, and read the screenshot as a
-stranger would. He is judging the page, not the changelog.
+- **Bundle:** `npx --no-install malloyyo dashboard bundle --out docs --title "malloyyo-imdb-fork" --duckdb bundled --no-serve`
+- **Serve:** any no-cache static server on `docs/` at `127.0.0.1:8810`. Free the port with
+  `fuser -k 8810/tcp` — a `pkill -f` pattern matches its own argv and kills the shell.
+- **Time a query before trusting it:** `npx --no-install malloy-cli run dashboards/next_watch.malloy <query>`.
+  Anything over ~5s locally will hang the browser. This is the check that would have saved the session.
+- **Push:** `bash scripts/push.sh` — never a bare `git push`.
+- **Skill:** `work/.claude/skills/data-site` holds every trap this stack produces.
+- **Style ruling:** match Lloyd's visual system exactly. "Better means MORE, not DIFFERENT."
