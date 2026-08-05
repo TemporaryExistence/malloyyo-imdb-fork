@@ -4,10 +4,15 @@
 
 ---
 
-## 1. STATUS: Andrew's eight rejections are all addressed. Nothing is pushed.
+## 1. STATUS: Andrew's eight rejections are all addressed. PUSHED AND LIVE.
 
-Commit `d390661` is **local only**. The live site is still `81cd348` and does **not** have any of
-this. Publishing is Andrew's (CHARTER §5) and the site auto-deploys on push.
+Live at https://temporaryexistence.github.io/malloyyo-imdb-fork/ at `7c9ab91`. Verified against the
+LIVE URL, not localhost: the served `assets/next_watch.js` is byte-identical to the local build and
+the full stress suite passes against the public site.
+
+⛔ **Sync All does NOT cover this repo.** It is absent from `sync-all.sh`'s `REPOS=()` and from the
+root `.gitignore`, so the button skips it and the root repo absorbs it as an embedded gitlink
+instead. Push with `bash scripts/push.sh` until CC lands the fix (note filed 2026-08-04).
 
 | # | His words | State |
 |---|---|---|
