@@ -778,10 +778,25 @@ export default function Dashboard({ dashboard, givens }) {
       // with the five full-match historical epics (Robin Hood, King Arthur,
       // Kingdom of Heaven, Exodus, First Knight) and The Counselor falls to 6th.
       //
-      // Deliberately NOT applied to rich profiles: measured against the
-      // validated Coen/Tarantino five-title set it is a lateral move, not an
-      // improvement, and that path is the one that was validated against the
-      // data before any UI existed. Narrow the fix to the regime where it was
+      // ⛔ DELIBERATELY NOT APPLIED TO RICH PROFILES, AND THIS WAS MEASURED IN
+      // THE RENDERED UI, NOT REASONED ABOUT. Upstream's own ranking style is one
+      // legible aggregate per query with a stated reason (`order_by:
+      // total_ratings desc` "a symmetric aggregate that survives the fan-out";
+      // `numVotes.max()` "rather than sum() so it stays the title's own vote
+      // count"), so ordering by genre agreement alone everywhere is the
+      // Lloyd-shaped choice. It was tried, on the validated Coen/Tarantino
+      // five-title seed, and it REGRESSES:
+      //
+      //   cosine (kept):  Blood Simple, Kill Bill, RESERVOIR DOGS, Ladykillers…
+      //   genre-first:    Ladykillers, Blood Simple, Jackie Brown, Kill Bill…
+      //                   Reservoir Dogs falls out of the top 14 entirely, and
+      //                   CSI: Crime Scene Investigation and MobLand come in.
+      //
+      // Reservoir Dogs is the exact title the original scoring work cited as the
+      // good outcome. Losing it to gain a TV procedural is a worse list, so the
+      // cosine stays wherever genre_fit has real dynamic range. Style-match to
+      // upstream governs the VISUAL system (CHARTER §5); it does not outrank a
+      // measured quality regression. Narrow the fix to the regime where it was
       // measured to help; do not re-tune the regime that already works.
       .sort((a, b) => (liked.length < 3 && Math.abs(num(a.genre_fit) - num(b.genre_fit)) > 1e-9
         ? num(b.genre_fit) - num(a.genre_fit)
@@ -916,6 +931,75 @@ export default function Dashboard({ dashboard, givens }) {
     return best;
   }, [pool, verdicts, genreSeen, deck]);
 
+  // --- ratings import (CHARTER §4.2) ---------------------------------------
+  // The charter demoted this from headline to power-user path and the build
+  // order permits cutting it. It ships because it is the sharpest demonstration
+  // of the thing this whole architecture exists to show: the query engine is in
+  // the BROWSER, so a ratings file is parsed where it sits and no upload
+  // happens. Upstream's entire design is "static site, parquet, no backend";
+  // an import that needs a server would contradict it, and this one cannot.
+  //
+  // IMDb's export carries `Const` (tt…) so it matches EXACTLY. Letterboxd's
+  // does not, and title+year matching is a different job -- so a Letterboxd
+  // file is REFUSED BY NAME rather than silently importing zero rows.
+  const [importMsg, setImportMsg] = React.useState(null);
+
+  const importCsv = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onerror = () => setImportMsg("Could not read that file.");
+    reader.onload = () => {
+      try {
+        const text = String(reader.result || "");
+        // quoted fields contain commas (titles do), so split on commas that are
+        // followed by an even number of quotes
+        const splitRow = (line) =>
+          (line.match(/("([^"]|"")*"|[^,]*)(,|$)/g) || [])
+            .map((c) => c.replace(/,$/, "").replace(/^"|"$/g, "").replace(/""/g, '"'))
+            .slice(0, -1);
+        const lines = text.split(/\r?\n/).filter((l) => l.trim());
+        if (!lines.length) return setImportMsg("That file is empty.");
+        const head = splitRow(lines[0]).map((h) => h.trim().toLowerCase());
+        const idCol = head.findIndex((h) => h === "const" || h === "imdb id" || h === "tconst");
+        const rateCol = head.findIndex((h) => h === "your rating" || h === "rating");
+        if (idCol === -1) {
+          return setImportMsg(
+            head.indexOf("letterboxd uri") !== -1
+              ? "That is a Letterboxd export. It has no IMDb ids, so it cannot be matched exactly. Use IMDb's ratings.csv."
+              : "No IMDb id column found. Export ratings.csv from IMDb.");
+        }
+        const known = new Set((seeds.rows || []).map((r) => r.tconst));
+        let up = 0, down = 0, unknown = 0;
+        const next = {};
+        for (const line of lines.slice(1)) {
+          const c = splitRow(line);
+          const id = (c[idCol] || "").trim();
+          if (!/^tt\d+$/.test(id)) continue;
+          const score = rateCol === -1 ? NaN : parseFloat(c[rateCol]);
+          // IMDb rates 1-10. 7+ is a like, 4- is a dislike, 5-6 is an opinion
+          // too weak to push the profile either way.
+          let v = null;
+          if (!isNaN(score)) v = score >= 7 ? "up" : score <= 4 ? "down" : null;
+          if (!v) continue;
+          next[id] = v;
+          if (v === "up") up++; else down++;
+          if (!known.has(id)) unknown++;
+        }
+        if (!up && !down) return setImportMsg("No usable ratings in that file.");
+        setVerdicts((s) => ({ ...s, ...next }));
+        // The corpus is upstream's ~24k popular titles, not all of IMDb, so a
+        // real export will contain films that are simply not here. Saying so is
+        // the difference between an honest count and a silently short list.
+        setImportMsg(
+          `Imported ${up + down} ratings (${up} liked, ${down} not for you). ` +
+          `Nothing left your browser.`);
+      } catch (e) {
+        setImportMsg("Could not parse that file as a CSV.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
   // keyboard: swipe mode must not require a mouse or a touchscreen
   React.useEffect(() => {
     if (mode !== "swipe") return;
@@ -988,7 +1072,19 @@ export default function Dashboard({ dashboard, givens }) {
               style={{ font: "inherit", fontSize: 12, cursor: "pointer", padding: "4px 8px", borderRadius: 7,
                        background: ink.surface, color: ink.text2, border: `1px solid ${ink.track}` }}>Undo</button>
           )}
+          {/* Drawn as a chip so it reads as one more way in, not a feature
+              bolted on. The file is read in the page; there is nowhere for it
+              to be uploaded TO. */}
+          <label style={{ font: "inherit", fontSize: 12, cursor: "pointer", padding: "4px 9px", borderRadius: 7,
+                          background: ink.surface, color: ink.text2, border: `1px solid ${ink.track}` }}>
+            Import IMDb ratings
+            <input type="file" accept=".csv,text/csv" style={{ display: "none" }}
+                   onChange={(e) => { importCsv(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+          </label>
         </div>
+        {importMsg && (
+          <div style={{ fontSize: 12, color: ink.muted, marginTop: 8 }}>{importMsg}</div>
+        )}
       </div>
 
       {mode === "grid" && (

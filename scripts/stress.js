@@ -305,6 +305,34 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       else ok("the short-vector bias is gone (The Counselor is not top-5)");
     }
 
+    // 8. RATINGS IMPORT (CHARTER §4.2). The claim on screen is "nothing left
+    // your browser" — so the test asserts the NETWORK, not just the message.
+    // A Letterboxd file must be refused BY NAME; silently importing zero rows
+    // from a file the user just handed us is the worst available outcome.
+    const p2 = await b.newPage({ viewport: { width: 1440, height: 1200 } });
+    const uploads = [];
+    p2.on("request", (r) => { if (r.method() === "POST" || /upload/i.test(r.url())) uploads.push(r.url()); });
+    await p2.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p2.waitForTimeout(17000);
+    const FIX = __dirname + "/../fixtures";
+    await p2.locator("input[type=file]").setInputFiles(FIX + "/letterboxd.csv");
+    await p2.waitForTimeout(2500);
+    let it = await p2.evaluate(() => document.body.innerText);
+    if (!/Letterboxd export/.test(it)) note("import", "a Letterboxd file was not refused by name");
+    else if (!/nothing rated yet/.test(it)) note("import", "a refused file still changed the ratings");
+    else ok("a Letterboxd file is refused by name and changes nothing");
+
+    await p2.locator("input[type=file]").setInputFiles(FIX + "/imdb-ratings.csv");
+    await p2.waitForTimeout(9000);
+    it = await p2.evaluate(() => document.body.innerText);
+    // 10, 9, 8 are likes; 2 is a dislike; the 6 is too weak to count either way
+    if (!/Imported 4 ratings \(3 liked, 1 not for you\)/.test(it))
+      note("import", "IMDb import did not apply the expected 3 likes / 1 dislike / 1 ignored");
+    else ok("IMDb ratings.csv imports with the middling score correctly ignored");
+    if (uploads.length) note("import", `the file was uploaded somewhere (${uploads.length} requests)`);
+    else ok("the imported file never left the browser (0 uploads)");
+    await p2.close();
+
     // 6. TMDB requires the JustWatch credit on EACH media item. It lived only
     // in a `title=` tooltip, which a touch device cannot open.
     const credit = await p.evaluate(() =>
