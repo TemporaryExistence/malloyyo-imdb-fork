@@ -574,6 +574,68 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     }
   }
 
+  // All three of these were found by Andrew USING the live site, not by this
+  // suite. Each is now asserted.
+  console.log("\n[6f] what the suite missed and a user did not");
+  {
+    // ⛔ PROVIDER MARKS ON UPSTREAM'S OWN PAGE. [6b] only ever counted marks on
+    // next_watch. genre_pairs is the page a visitor LANDS on, its availability
+    // query returned one row per (title x kind x provider) with no collapse and
+    // no limit — 220,963 rows against a 5,000-row runtime cap — and it rendered
+    // 167 posters carrying THREE marks. Nothing errored.
+    const gp = await b.newPage({ viewport: { width: 1440, height: 1200 } });
+    await gp.goto(BASE + "/genre_pairs.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await gp.waitForTimeout(20000);
+    await gp.evaluate(async () => {
+      for (let y = 0; y < document.body.scrollHeight; y += 500) { window.scrollTo(0, y); await new Promise((r) => setTimeout(r, 100)); }
+    });
+    await gp.waitForTimeout(3000);
+    const gpm = await gp.evaluate(() => ({
+      posters: document.querySelectorAll('img[alt^="Poster for"]').length,
+      logos: [...document.querySelectorAll("img")].filter((i) => /image\.tmdb\.org\/t\/p\/w45/.test(i.src)).length,
+    }));
+    if (gpm.posters >= 50 && gpm.logos < gpm.posters * 0.4)
+      note("genre-pairs-marks", `only ${gpm.logos} provider marks over ${gpm.posters} posters on upstream's own page`);
+    else ok(`genre_pairs carries provider marks (${gpm.logos} over ${gpm.posters} posters)`);
+    await gp.close();
+
+    // ⛔ "NOT SEEN" MUST SURVIVE A RATING. It was stored by mutating the seed
+    // query's row; rating writes a given, the runtime re-runs its queries, the
+    // fresh rows lack the mutation, and the skipped card returned ~2 swipes
+    // later. Pure skipping never reproduced it — only skip INTERLEAVED with
+    // rating does, which is what a real visitor does.
+    const sk = await b.newPage({ viewport: { width: 1440, height: 900 } });
+    await sk.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await sk.waitForTimeout(18000);
+    await sk.getByRole("button", { name: "Swipe" }).click(); await sk.waitForTimeout(2000);
+    await sk.getByRole("button", { name: "Films" }).click(); await sk.waitForTimeout(4000);
+    const nameOf = () => sk.evaluate(() => {
+      const c = document.querySelector('div[style*="aspect-ratio"]');
+      return c ? c.parentElement.children[1].textContent : "";
+    });
+    const seq = [], skippedNames = new Set();
+    for (let i = 0; i < 10; i++) {
+      const n = await nameOf();
+      seq.push(n);
+      if (i % 2 === 0) { skippedNames.add(n); await sk.keyboard.press("ArrowDown"); }
+      else { await sk.keyboard.press("ArrowRight"); }
+      await sk.waitForTimeout(2100);
+    }
+    const returned = [...skippedNames].filter((s) => seq.filter((x) => x === s).length > 1);
+    if (returned.length) note("skip-persist", `a skipped card came back after a rating: ${returned.join(", ")}`);
+    else ok(`"not seen" survives interleaved ratings (${new Set(seq).size}/${seq.length} distinct)`);
+
+    // Andrew: down arrow or space should mark unseen, like left/right rate.
+    const before = await sk.evaluate(() => document.body.innerText);
+    await sk.keyboard.press("Space");
+    await sk.waitForTimeout(2200);
+    const after = await sk.evaluate(() => document.body.innerText);
+    const likes = (s) => (s.match(/(\d+) liked/) || [0, "0"])[1];
+    if (likes(before) !== likes(after)) note("skip-keys", "Space recorded a rating instead of skipping");
+    else ok("Space marks unseen without recording a verdict");
+    await sk.close();
+  }
+
   console.log("\n[7] internal links resolve");
   const p = await b.newPage({ viewport: { width: 1440, height: 1000 } });
   await p.goto(BASE + "/index.html", { waitUntil: "networkidle", timeout: 90000 });

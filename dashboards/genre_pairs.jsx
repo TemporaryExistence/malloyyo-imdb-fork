@@ -58,16 +58,18 @@ const compact = (n) =>
 // TMDB requires JustWatch to be credited on EACH media item, so the mark and
 // its attribution travel together -- the title text on the badge carries it.
 const LOGO = (p) => (p ? "https://image.tmdb.org/t/p/w45" + p : null);
+// One row per title now (see the query), so `offers` is {logos, names} rather
+// than a list of offer rows. The credit is in alt text as well as the tooltip:
+// a touch device can never open a title= tooltip, which made the per-item
+// attribution TMDB requires effectively absent on a phone.
 function ProviderMark({ offers }) {
-  if (!offers || !offers.length) return null;
-  const stream = offers.filter((o) => o.offer_kind === "flatrate");
-  const shown = (stream.length ? stream : offers).slice(0, 3);
-  const all = (stream.length ? stream : offers).map((o) => o.provider_name).join(", ");
+  if (!offers || !offers.logos || !offers.logos.length) return null;
+  const credit = `${offers.names} - source: JustWatch`;
   return (
-    <span title={`${all} - source: JustWatch`}
+    <span title={credit} aria-label={credit} role="img"
           style={{ position: "absolute", right: 3, bottom: 3, display: "flex", gap: 2 }}>
-      {shown.map((o, i) => (
-        <img key={i} src={LOGO(o.logo_path)} alt={o.provider_name} width={16} height={16} loading="lazy"
+      {offers.logos.map((p, i) => (
+        <img key={i} src={LOGO(p)} alt={i === 0 ? credit : ""} width={16} height={16} loading="lazy"
              style={{ borderRadius: 3, background: "#fff", display: "block",
                       boxShadow: "0 0 0 1px rgba(0,0,0,.35)" }} />
       ))}
@@ -373,7 +375,12 @@ export default function Dashboard({ dashboard, givens }) {
   const avail = useQuery({ query: "availability", givens });
   const offersFor = React.useMemo(() => {
     const m = {};
-    for (const r of avail.rows || []) (m[r.imdb_id] = m[r.imdb_id] || []).push(r);
+    for (const r of avail.rows || []) {
+      m[r.imdb_id] = {
+        logos: String(r.logos || "").split("|").filter(Boolean).slice(0, 3),
+        names: r.names || "",
+      };
+    }
     return m;
   }, [avail.rows]);
   const gGenre = useGiven("GENRE");

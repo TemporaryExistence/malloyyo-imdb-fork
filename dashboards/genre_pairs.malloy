@@ -86,7 +86,26 @@ query: genre_periods is movies -> {
 // FORK ADDITION (F1): US availability for the titles on this page, so each
 // poster can carry its provider mark. Every row carries JustWatch's
 // attribution because TMDB requires the credit on each media item.
+//
+// ⛔ ONE ROW PER TITLE, ORDERED BY POPULARITY, AND THAT IS LOad-BEARING.
+// This query used to return one row per (title x offer_kind x provider) with no
+// filter, no collapse and no order: 220,963 rows against a runtime that CAPS a
+// result at 5,000 whatever you ask for. So ~2% got through, WHICH 2% was
+// arbitrary, and this page — the one a visitor lands on — rendered 167 posters
+// carrying THREE marks. Nothing errored; the feature was simply, quietly
+// missing. next_watch's copy of this query was fixed for exactly this months
+// ago and this one was never given the same treatment.
+// Collapsing to one row per title makes the payload an order of magnitude
+// smaller AND complete; ordering by votes means the 5,000 that survive are the
+// ones actually on screen.
 #" Where to watch
 query: availability is providers -> {
-  group_by: imdb_id, offer_kind, provider_name, logo_path, link, attribution
+  where: offer_kind = 'flatrate'
+  group_by: imdb_id
+  aggregate:
+    logos is string_agg(logo_path, '|')
+    names is string_agg(provider_name, ', ')
+    votes is title.numVotes.max()
+  order_by: votes desc
+  limit: 5000
 }

@@ -625,6 +625,14 @@ export default function Dashboard({ dashboard, givens }) {
   let [verdicts, setVerdicts] = React.useState({});
   const [mode, setMode] = React.useState("grid");
   const [deck, setDeck] = React.useState(0);
+  // ⛔ "NOT SEEN" IS STATE, NOT A MUTATION ON A QUERY ROW. It used to be
+  // remembered as `row._shown++` on the object the seed query returned. Rating
+  // anything writes a given, the runtime re-runs its query set, and the fresh
+  // rows arrive WITHOUT that property — so every skip was forgotten the moment
+  // the visitor rated something, and the skipped card came back about two
+  // swipes later. Reproduced exactly: skip, like, skip → Shawshank returns.
+  // A React set survives any number of query re-runs.
+  const [skipped, setSkipped] = React.useState(() => new Set());
   const [open, setOpen] = React.useState(null);
   const [history, setHistory] = React.useState([]);
   const [q, setQ] = React.useState("");
@@ -773,6 +781,13 @@ export default function Dashboard({ dashboard, givens }) {
     setHistory((h) => [...h, { kind: "title", id: tconst, prev: verdicts[tconst] ?? null }]);
     setVerdicts((s) => { const n = { ...s }; if (v == null) delete n[tconst]; else n[tconst] = v; return n; });
   };
+  // Undoable like any other verdict — a mis-tapped "not seen" removes a card
+  // from the session, which is exactly the kind of slip Undo exists for.
+  const skip = (tconst) => {
+    setHistory((h) => [...h, { kind: "skip", id: tconst }]);
+    setSkipped((s) => { const n = new Set(s); n.add(tconst); return n; });
+    setDeck((d) => d + 1);
+  };
   const ratePerson = (nconst, v) => {
     setHistory((h) => [...h, { kind: "person", id: nconst, prev: peopleVerdicts[nconst] ?? null }]);
     setPeopleVerdicts((s) => ({ ...s, [nconst]: v }));
@@ -787,7 +802,10 @@ export default function Dashboard({ dashboard, givens }) {
         if (last.prev == null) delete n[last.id]; else n[last.id] = last.prev;
         return n;
       };
-      if (last.kind === "person") setPeopleVerdicts(restore);
+      if (last.kind === "skip") {
+        setSkipped((s) => { const n = new Set(s); n.delete(last.id); return n; });
+        setDeck((d) => Math.max(0, d - 1));
+      } else if (last.kind === "person") setPeopleVerdicts(restore);
       else { setVerdicts(restore); setDeck((d) => Math.max(0, d - 1)); }
       return h.slice(0, -1);
     });
@@ -1099,26 +1117,26 @@ export default function Dashboard({ dashboard, givens }) {
     if (mode !== "swipe") return;
     const nextPeople = (seedPeople.rows || [])
       .filter((r) => r.nconst && !peopleVerdicts[r.nconst]).slice(0, 4).map((r) => r.photo);
-    const nextTitles = pool.filter((r) => !verdicts[r.tconst]).slice(0, 4)
+    const nextTitles = pool.filter((r) => !verdicts[r.tconst] && !skipped.has(r.tconst)).slice(0, 4)
       .map((r) => (r.poster ? r.poster.replace("/w154", "/w500") : null));
     for (const src of [...nextPeople, ...nextTitles]) {
       if (src) { const im = new window.Image(); im.src = src; }
     }
-  }, [mode, swipeKind, seedPeople.rows, peopleVerdicts, pool, verdicts]);
+  }, [mode, swipeKind, seedPeople.rows, peopleVerdicts, pool, verdicts, skipped]);
 
   const card = React.useMemo(() => {
-    const unrated = pool.filter((r) => !verdicts[r.tconst]);
+    // "Not seen" removes the card for the session. Telling us you have not seen
+    // something and being shown it again is the deck ignoring you.
+    const unrated = pool.filter((r) => !verdicts[r.tconst] && !skipped.has(r.tconst));
     if (!unrated.length) return null;
-    // `deck` still advances so "haven't seen it" can skip past a card without
-    // rating it; it just no longer dictates the order.
     let best = null, bestScore = -Infinity;
     for (const r of unrated) {
       const known = genreSeen[r.genre || "?"] || 0;
-      const score = -known * 3 + Math.log10(Math.max(10, num(r.num_votes))) - (r._shown || 0) * 10;
+      const score = -known * 3 + Math.log10(Math.max(10, num(r.num_votes)));
       if (score > bestScore) { bestScore = score; best = r; }
     }
     return best;
-  }, [pool, verdicts, genreSeen, deck]);
+  }, [pool, verdicts, skipped, genreSeen, deck]);
 
   // --- ratings import (CHARTER §4.2) ---------------------------------------
   // The charter demoted this from headline to power-user path and the build
@@ -1216,12 +1234,22 @@ export default function Dashboard({ dashboard, givens }) {
       if (usePersonCard) {
         if (e.key === "ArrowRight") ratePerson(personCard.nconst, "up");
         else if (e.key === "ArrowLeft") ratePerson(personCard.nconst, "down");
-        else if (e.key === "ArrowUp" || e.key === " ") ratePerson(personCard.nconst, "skip");
+        else if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === " ") {
+          e.preventDefault();
+          ratePerson(personCard.nconst, "skip");
+        }
         return;
       }
       if (e.key === "ArrowRight") { rate(card.tconst, "up"); setDeck((d) => d + 1); }
       else if (e.key === "ArrowLeft") { rate(card.tconst, "down"); setDeck((d) => d + 1); }
-      else if (e.key === "ArrowUp" || e.key === " ") { card._shown = (card._shown || 0) + 1; setDeck((d) => d + 1); }
+      // Andrew: "if you can use the left/right arrow for like/dislike, then down
+      // arrow or space bar should work to mark a movie/actor/show unseen."
+      // Up already matched the up-SWIPE; down and space now do too, so the
+      // third outcome is reachable by whichever key you reach for.
+      else if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === " ") {
+        e.preventDefault();   // space would otherwise page the document
+        skip(card.tconst);
+      }
       else if ((e.key === "z" && (e.metaKey || e.ctrlKey)) || e.key === "Backspace") undo();
     };
     window.addEventListener("keydown", onKey);
@@ -1327,7 +1355,7 @@ export default function Dashboard({ dashboard, givens }) {
                 inputs on a touch device is instructions for someone else's
                 device. */}
             <span style={{ fontSize: 12, color: ink.muted, marginLeft: 6 }}>
-              {narrow ? "Swipe, or tap a side." : "Drag, click a side, or use arrow keys."}
+              {narrow ? "Swipe, or tap a side." : "Drag, click a side, or use arrow keys (down = not seen)."}
             </span>
           </div>
           {usePersonCard ? (
@@ -1348,7 +1376,7 @@ export default function Dashboard({ dashboard, givens }) {
               mark={<ProviderMark ink={ink} offers={offersFor[card.tconst]} size={28} />}
               onLike={() => { rate(card.tconst, "up"); setDeck((d) => d + 1); }}
               onDislike={() => { rate(card.tconst, "down"); setDeck((d) => d + 1); }}
-              onSkip={() => { card._shown = (card._shown || 0) + 1; setDeck((d) => d + 1); }} />
+              onSkip={() => skip(card.tconst)} />
           ) : <div style={{ color: ink.muted, fontSize: 13 }}>Deck finished.</div>}
         </div>
       )}
