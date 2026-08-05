@@ -6,7 +6,7 @@
 
 ## 1. STATUS: Andrew's eight rejections are all addressed. PUSHED AND LIVE.
 
-Live at https://temporaryexistence.github.io/malloyyo-imdb-fork/ at `435f869`. Verified against the
+Live at https://temporaryexistence.github.io/malloyyo-imdb-fork/ at `c41edc8`. Verified against the
 LIVE URL, not localhost: the served `assets/next_watch.js` is byte-identical to the local build and
 the full stress suite passes against the public site.
 
