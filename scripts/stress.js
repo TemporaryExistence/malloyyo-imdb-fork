@@ -13,6 +13,38 @@ const PAGES = ["index", "genre_pairs", "next_watch", "works_together"];
 // being wrong about the site, not the site being broken.
 const POSTER_PAGES = new Set(["genre_pairs", "next_watch"]);
 
+// ⛔ THE CONSTANTS BELOW ARE A CONTRACT, AND THIS ASSERTS THEY STILL MATCH THE
+// SOURCE. The card-size checks recompute what the CSS intends rather than using
+// a magic ratio, which stops a CSS-only shrink from passing. But the numbers
+// were a hand copy in this file, so weakening the HARNESS alone would have gone
+// green and undetectable — the "threshold parked below what the code does" trap
+// wearing its third disguise. Parsing the source and requiring agreement means:
+// a CSS-only change fails (rendered < intent), a harness-only change fails
+// (here), and changing both is a deliberate edit visible in one diff.
+const CARD_INTENT = { wideVh: 0.82, wideMax: 820, wideReserve: 145,
+                      narrowVh: 0.78, narrowMax: 660, narrowReserve: 220 };
+(function assertCardIntentMatchesSource() {
+  const src = require("fs").readFileSync(__dirname + "/../dashboards/next_watch.jsx", "utf8");
+  const grab = (name) => {
+    const m = src.match(new RegExp(name + '\\s*=\\s*"min\\((\\d+)vh,\\s*(\\d+)px,\\s*calc\\(100vh - (\\d+)px\\)\\)"'));
+    return m ? { vh: +m[1] / 100, max: +m[2], reserve: +m[3] } : null;
+  };
+  const w = grab("CARD_H_WIDE"), n = grab("CARD_H_NARROW");
+  const bad = [];
+  if (!w) bad.push("could not parse CARD_H_WIDE from the component");
+  else if (w.vh !== CARD_INTENT.wideVh || w.max !== CARD_INTENT.wideMax || w.reserve !== CARD_INTENT.wideReserve)
+    bad.push(`CARD_H_WIDE is ${w.vh * 100}vh/${w.max}px/${w.reserve}px, harness expects ${CARD_INTENT.wideVh * 100}vh/${CARD_INTENT.wideMax}px/${CARD_INTENT.wideReserve}px`);
+  if (!n) bad.push("could not parse CARD_H_NARROW from the component");
+  else if (n.vh !== CARD_INTENT.narrowVh || n.max !== CARD_INTENT.narrowMax || n.reserve !== CARD_INTENT.narrowReserve)
+    bad.push(`CARD_H_NARROW is ${n.vh * 100}vh/${n.max}px/${n.reserve}px, harness expects ${CARD_INTENT.narrowVh * 100}vh/${CARD_INTENT.narrowMax}px/${CARD_INTENT.narrowReserve}px`);
+  if (bad.length) {
+    console.log("\nCARD-SIZE CONTRACT BROKEN — the component and this suite disagree:");
+    bad.forEach((b) => console.log("  " + b));
+    console.log("If the change is intended, update BOTH deliberately.\n");
+    process.exit(1);
+  }
+})();
+
 const fails = [];
 const note = (t, m) => { fails.push(`${t}: ${m}`); console.log(`  FAIL  ${t} - ${m}`); };
 const ok = (t) => console.log(`  ok    ${t}`);
@@ -235,7 +267,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       // min(82vh, 820px, 100vh - 145px) — and requires the card to actually be
       // that. A threshold cannot be parked below what the code does if it is
       // derived from what the code is supposed to do.
-      const wantWide = Math.min(0.82 * geom.vh, 820, geom.vh - 145);
+      const wantWide = Math.min(CARD_INTENT.wideVh * geom.vh, CARD_INTENT.wideMax, geom.vh - CARD_INTENT.wideReserve);
       if (geom.h < wantWide - 3) note("swipe-card", `card is ${geom.h}px where the CSS intends ${Math.round(wantWide)}px (${Math.round(geom.h / geom.vh * 100)}% of ${geom.vh})`);
       else ok(`card is ${geom.h}px of ${geom.vh} (nearly full screen)`);
       if (geom.top < 0 || geom.bottom > geom.vh + 2) note("swipe-card", `card runs off screen (${geom.top}..${geom.bottom} of ${geom.vh})`);
@@ -429,7 +461,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       // Same rule as the desktop check, and for the same reason: 0.70 against
       // an actual 0.725 was the identical trap one level down. Derived from the
       // CSS intent, min(78vh, 660px, 100vh - 220px), not from a round number.
-      const wantNarrow = Math.min(0.78 * geo.vh, 660, geo.vh - 220);
+      const wantNarrow = Math.min(CARD_INTENT.narrowVh * geo.vh, CARD_INTENT.narrowMax, geo.vh - CARD_INTENT.narrowReserve);
       if (geo.h < wantNarrow - 3) note("mobile-stage", `mobile card is ${geo.h}px where the CSS intends ${Math.round(wantNarrow)}px`);
       else ok(`the mobile card is the full intended ${geo.h}px (${Math.round(geo.h / geo.vh * 100)}% of viewport height)`);
     }
