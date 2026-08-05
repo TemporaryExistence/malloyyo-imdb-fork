@@ -227,13 +227,16 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     });
     if (!geom) note("swipe-card", "no card rendered");
     else {
-      // ⛔ 0.78, and the history of this number is the point. It was 0.55, then
-      // 0.70 when the card was at 0.82 — so when a later fix quietly shrank the
-      // card to 0.73 this check PASSED and certified the regression. A
-      // threshold set comfortably below whatever the code currently does will
-      // ratify anything the code does next. It is now set just under the
-      // intended 0.82, so a shrink fails instead of being blessed.
-      if (geom.h < geom.vh * 0.78) note("swipe-card", `card is ${geom.h}px of a ${geom.vh}px viewport (${Math.round(geom.h / geom.vh * 100)}%), not nearly full screen`);
+      // ⛔ NO MAGIC THRESHOLD. The history of this number is the whole point: it
+      // was 0.55, then 0.70 while the card sat at 0.82 — so when a later fix
+      // shrank the card to 0.73, this check PASSED and certified the
+      // regression. Raising it to 0.78 only moved the same trap 4 points.
+      // So it no longer guesses: it recomputes what the CSS INTENDS —
+      // min(82vh, 820px, 100vh - 145px) — and requires the card to actually be
+      // that. A threshold cannot be parked below what the code does if it is
+      // derived from what the code is supposed to do.
+      const wantWide = Math.min(0.82 * geom.vh, 820, geom.vh - 145);
+      if (geom.h < wantWide - 3) note("swipe-card", `card is ${geom.h}px where the CSS intends ${Math.round(wantWide)}px (${Math.round(geom.h / geom.vh * 100)}% of ${geom.vh})`);
       else ok(`card is ${geom.h}px of ${geom.vh} (nearly full screen)`);
       if (geom.top < 0 || geom.bottom > geom.vh + 2) note("swipe-card", `card runs off screen (${geom.top}..${geom.bottom} of ${geom.vh})`);
       else ok("card sits fully on screen");
@@ -423,9 +426,12 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       else ok(`the whole mobile stage fits the fold (${geo.bot} of ${geo.vh}, emulated)`);
       if (geo.w < geo.vw * 0.85) note("mobile-stage", `card is only ${Math.round(geo.w / geo.vw * 100)}% of width, not near-full-bleed`);
       else ok(`the mobile card is near-full-bleed (${Math.round(geo.w / geo.vw * 100)}% of width)`);
-      // the same shrink-ratification trap applies to height on mobile
-      if (geo.h < geo.vh * 0.70) note("mobile-stage", `mobile card is only ${Math.round(geo.h / geo.vh * 100)}% of viewport height`);
-      else ok(`the mobile card fills ${Math.round(geo.h / geo.vh * 100)}% of viewport height`);
+      // Same rule as the desktop check, and for the same reason: 0.70 against
+      // an actual 0.725 was the identical trap one level down. Derived from the
+      // CSS intent, min(78vh, 660px, 100vh - 220px), not from a round number.
+      const wantNarrow = Math.min(0.78 * geo.vh, 660, geo.vh - 220);
+      if (geo.h < wantNarrow - 3) note("mobile-stage", `mobile card is ${geo.h}px where the CSS intends ${Math.round(wantNarrow)}px`);
+      else ok(`the mobile card is the full intended ${geo.h}px (${Math.round(geo.h / geo.vh * 100)}% of viewport height)`);
     }
     await m.close(); await mctx.close();
   }

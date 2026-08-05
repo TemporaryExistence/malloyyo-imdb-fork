@@ -971,6 +971,7 @@ export default function Dashboard({ dashboard, givens }) {
   // correctly every time. Measure after two frames, then check once more after
   // the swipe-mode content has settled.
   const stageRef = React.useRef(null);
+  const recenterRef = React.useRef(null);
   React.useEffect(() => {
     if (mode !== "swipe") return;
     // `block:"center"` left the foot flush with the fold, so the disclaimer sat
@@ -990,14 +991,59 @@ export default function Dashboard({ dashboard, givens }) {
       const tallerThanScreen = r.height + PAD * 2 > vh;
       el.style.scrollMarginTop = PAD + "px";
       el.style.scrollMarginBottom = PAD + "px";
-      // Taller than the viewport: align the TOP, so the picture and its name
-      // stay together. Otherwise align the FOOT, which is what was being lost.
-      el.scrollIntoView({ block: tallerThanScreen ? "start" : "end", behavior: "smooth" });
+      // INSTANT, not smooth. A smooth correction is still animating when a
+      // visitor starts scrolling, so the two fight and the page snaps back —
+      // the "userScrolled" guard below cannot stop a scroll already in flight.
+      // An instant correction is over within the frame and has nothing to fight.
+      el.scrollIntoView({ block: tallerThanScreen ? "start" : "end", behavior: "auto" });
     };
+    // ⛔ NEVER FIGHT A DELIBERATE SCROLL. The pending re-check used to fire
+    // ~400ms after entering swipe mode regardless, so a visitor who scrolled in
+    // that window got yanked back. Any user scroll disarms every pending
+    // correction; the auto-scroll gets one chance and then defers.
+    // ⛔ CORRECT ONLY WHAT THE APP BROKE. Two earlier guards were the wrong
+    // instrument. Watching scroll POSITION could not tell an app-caused layout
+    // shift from a deliberate scroll — both move scrollY — so it disarmed
+    // itself on the very shifts it existed to fix. Watching the column's
+    // VISIBILITY was worse: scrolling away is exactly the column leaving view,
+    // so it re-centred and fought the visitor.
+    // The causal signal is the DOCUMENT HEIGHT: a re-query that relaid the page
+    // changes it, and scrolling never does. Correct on that, never on scrolling.
+    let userScrolled = false;
+    const onUserInput = () => { userScrolled = true; };
+    const guarded = () => { if (!userScrolled) center(); };
+    window.addEventListener("wheel", onUserInput, { passive: true });
+    window.addEventListener("touchmove", onUserInput, { passive: true });
+
     let a, c;
-    a = requestAnimationFrame(() => { c = requestAnimationFrame(center); });
-    const t = window.setTimeout(center, 400);
-    return () => { cancelAnimationFrame(a); cancelAnimationFrame(c); window.clearTimeout(t); };
+    a = requestAnimationFrame(() => { c = requestAnimationFrame(guarded); });
+    const t = window.setTimeout(guarded, 400);
+
+    // The guarantee used to be ONE-SHOT, keyed to [mode, swipeKind]. Re-clicking
+    // the already-active chip changes neither, so the effect never re-ran — but
+    // the click still re-queried and relaid out, nudging the page 23px and
+    // clipping the disclaimer again at 1366x768. Watch the column's geometry
+    // instead of guessing which interactions move it.
+    // A ResizeObserver was the wrong instrument: re-clicking the chip re-runs a
+    // query and shifts the column's POSITION without changing its SIZE, so the
+    // observer never fired and the disclaimer clipped again. Watch visibility
+    // instead — it catches a drift out of view whatever caused it.
+    // ⛔ THE NUDGE WAS FOCUS, NOT LAYOUT — which is why three observers in a row
+    // failed to catch it. Clicking a mode chip FOCUSES it, and the browser
+    // scrolls a focused control into view; the chips sit above the card, so the
+    // page rose 23px and pushed the disclaimer off. No ResizeObserver,
+    // IntersectionObserver or scroll-position watcher can see that, because
+    // nothing resized, nothing left view on its own, and the scroll was real.
+    // The chip handlers re-assert directly instead — see `recenterRef`.
+    recenterRef.current = guarded;
+    const io = null;
+    return () => {
+      cancelAnimationFrame(a); cancelAnimationFrame(c); window.clearTimeout(t);
+      window.removeEventListener("wheel", onUserInput);
+      window.removeEventListener("touchmove", onUserInput);
+      if (io) io.disconnect();
+      recenterRef.current = null;
+    };
   }, [mode, swipeKind]);
 
   const [copied, setCopied] = React.useState(null);
@@ -1269,6 +1315,12 @@ export default function Dashboard({ dashboard, givens }) {
                 onClick={() => {
                   setSwipeKind(k);
                   gType.set(k === "people" ? "" : filters.oneOf(k));
+                  // Re-assert AFTER the browser's focus-scroll, including when
+                  // the chip was already active — that no-op click changes no
+                  // state, so nothing else would put the disclaimer back.
+                  requestAnimationFrame(() => {
+                    requestAnimationFrame(() => recenterRef.current && recenterRef.current());
+                  });
                 }}>{label}</Chip>
             ))}
             {/* A phone has no arrow keys and nothing to "click"; naming desktop
