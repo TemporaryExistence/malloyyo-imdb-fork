@@ -52,9 +52,9 @@ export default function Landing({ dashboards = [] }) {
 
       <h1>malloyyo-imdb</h1>
       <p className="sub">
-        The 18,627 films with more than 5,000 IMDb ratings &mdash; who made them,
-        who appeared in them, and how they were rated. Every dashboard runs
-        entirely in your browser.
+        The 24,052 films and shows with more than 5,000 IMDb ratings &mdash; who made
+        them, who appeared in them, how they were rated, and where to watch them.
+        Every dashboard runs entirely in your browser.
       </p>
 
       <ul className="cards">

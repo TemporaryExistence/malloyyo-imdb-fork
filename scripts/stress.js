@@ -118,6 +118,48 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     await p.close();
   }
 
+  console.log("\n[6b] the defects a green suite once missed");
+  {
+    // The suite was green while three blocking bugs were live: the rec list
+    // rendered 28 posterless boxes, search was case-sensitive, and provider
+    // marks reached 6 of 48 posters. A suite that cannot see the actual product
+    // failing is worse than none, so each is now asserted directly.
+    const p = await b.newPage({ viewport: { width: 1440, height: 1100 } });
+    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(17000);
+
+    const marks = await p.evaluate(() => ({
+      tiles: document.querySelectorAll('img[alt^="Poster for"]').length,
+      logos: [...document.querySelectorAll("img")].filter((i) => i.getAttribute("width") === "16").length,
+    }));
+    if (marks.tiles >= 20 && marks.logos < 20) note("provider-marks", `only ${marks.logos} logos over ${marks.tiles} posters`);
+    else ok(`provider marks (${marks.logos} logos / ${marks.tiles} posters)`);
+
+    const tiles = await p.locator('img[alt^="Poster for"]').all();
+    for (const t of tiles.slice(0, 5)) { await t.click(); await p.waitForTimeout(220); }
+    await p.waitForTimeout(9000);
+    const recImgs = await p.evaluate(() => {
+      const h = [...document.querySelectorAll("div")].find((d) => d.innerText && d.innerText.startsWith("YOUR NEXT WATCH"));
+      const sec = h ? h.parentElement : document;
+      const imgs = [...sec.querySelectorAll('img[alt^="Poster for"]')];
+      return { n: imgs.length, loaded: imgs.filter((i) => i.naturalWidth > 20).length };
+    });
+    if (recImgs.n && recImgs.loaded < recImgs.n * 0.8) note("rec-posters", `${recImgs.loaded}/${recImgs.n} rendered`);
+    else ok(`rec list posters (${recImgs.loaded}/${recImgs.n})`);
+
+    await p.getByRole("button", { name: "Search" }).click();
+    await p.waitForTimeout(400);
+    const box = p.locator('input[placeholder*="Search"]');
+    for (const q of ["batman", "dark knight"]) {
+      await box.fill(q);
+      await p.waitForTimeout(4000);
+      const n = await p.evaluate(() => document.querySelectorAll('img[alt^="Poster for"]').length);
+      if (n === 0) note("search-case", `lowercase "${q}" returned nothing`);
+      else ok(`search lowercase "${q}" (${n})`);
+    }
+    await p.close();
+  }
+
   console.log("\n[7] internal links resolve");
   const p = await b.newPage({ viewport: { width: 1440, height: 1000 } });
   await p.goto(BASE + "/index.html", { waitUntil: "networkidle", timeout: 90000 });

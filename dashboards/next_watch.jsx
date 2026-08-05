@@ -65,16 +65,12 @@ const TYPE_LABEL = { movie: "Film", tvSeries: "Series", tvMiniSeries: "Mini-seri
 const LOGO = (p) => (p ? "https://image.tmdb.org/t/p/w45" + p : null);
 
 function ProviderMark({ ink, offers }) {
-  if (!offers || !offers.length) return null;
-  const stream = offers.filter((o) => o.offer_kind === "flatrate");
-  const show = (stream.length ? stream : offers).slice(0, 3);
+  if (!offers || !offers.logos || !offers.logos.length) return null;
   return (
-    <div
-      title={`${(stream.length ? stream : offers).map((o) => o.provider_name).join(", ")} — source: JustWatch`}
-      style={{ position: "absolute", right: 3, bottom: 3, display: "flex", gap: 2 }}
-    >
-      {show.map((o, i) => (
-        <img key={i} src={LOGO(o.logo_path)} alt={o.provider_name} width={16} height={16} loading="lazy"
+    <div title={`${offers.names} - source: JustWatch`}
+         style={{ position: "absolute", right: 3, bottom: 3, display: "flex", gap: 2 }}>
+      {offers.logos.map((p, i) => (
+        <img key={i} src={LOGO(p)} alt="" width={16} height={16} loading="lazy"
              style={{ borderRadius: 3, boxShadow: "0 0 0 1px rgba(0,0,0,.35)", background: "#fff", display: "block" }} />
       ))}
     </div>
@@ -125,7 +121,18 @@ function Tile({ ink, row, verdict, onRate, offers, onOpen }) {
   };
   return (
     <div style={{ width: TILE_W }}>
-      <div style={{ position: "relative", cursor: "pointer" }}
+      {/* the primary interaction must not be mouse-only: swipe mode had keyboard
+          support from the start, the grid did not */}
+      <div role="button" tabIndex={0}
+           aria-pressed={onRate ? verdict === "up" : undefined}
+           aria-label={(onRate ? "Rate " : "Open ") + row.primary_title}
+           style={{ position: "relative", cursor: "pointer", outlineOffset: 2 }}
+           onKeyDown={(e) => {
+             if (e.key === "Enter" || e.key === " ") {
+               e.preventDefault();
+               onRate ? onRate(verdict === "up" ? null : "up") : onOpen && onOpen();
+             }
+           }}
            onClick={() => (onRate ? onRate(verdict === "up" ? null : "up") : onOpen && onOpen())}>
         {row.poster && !bad
           ? <img src={row.poster} alt={`Poster for ${row.primary_title}`} width={TILE_W} height={156} loading="lazy"
@@ -159,6 +166,8 @@ export default function Dashboard({ dashboard, givens }) {
   const gDisliked = useGiven("DISLIKED");
   const gTitle = useGiven("TITLE");
   const gName = useGiven("NAME");
+  const gPerson = useGiven("PERSON_EXACT");
+  const gDetail = useGiven("DETAIL_ID");
 
   // verdicts: tconst -> 'up' | 'down'. The single source of truth for the UI;
   // the givens are derived from it so the engine and the screen cannot disagree.
@@ -200,15 +209,22 @@ export default function Dashboard({ dashboard, givens }) {
   const seeds = useQuery({ query: "seed_titles", givens });
   const recs = useQuery({ query: "recommendations", givens });
   const avail = useQuery({ query: "availability", givens });
+  const detail = useQuery({ query: "availability_detail", givens });
   const found = useQuery({ query: "search_titles", givens });
   const people = useQuery({ query: "search_people", givens });
   const personTitles = useQuery({ query: "titles_by_person", givens });
   const [person, setPerson] = React.useState("");
 
   // availability indexed by title, so a tile lookup is O(1) not a scan
+  // one row per title now: logos are a pipe-joined string
   const offersFor = React.useMemo(() => {
     const m = {};
-    for (const r of avail.rows || []) (m[r.imdb_id] = m[r.imdb_id] || []).push(r);
+    for (const r of avail.rows || []) {
+      m[r.imdb_id] = {
+        logos: String(r.logos || "").split("|").filter(Boolean).slice(0, 3),
+        names: r.names || "",
+      };
+    }
     return m;
   }, [avail.rows]);
 
@@ -353,8 +369,16 @@ export default function Dashboard({ dashboard, givens }) {
   );
 
   return (
-    <div>
-      {/* mode picker — same chip row as the genre picker upstream */}
+    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "22px 24px 48px", color: "var(--dash-fg)" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 680, letterSpacing: "-.02em", margin: "0 0 3px" }}>
+        {dashboard.title}
+      </h1>
+      <p style={{ color: ink.muted, fontSize: 13.5, lineHeight: 1.45, margin: "0 0 20px" }}>
+        Rate a few things you have seen and get a list you can actually go and watch, with where each one
+        is streaming in the US. Nothing you tap leaves your browser.
+      </p>
+
+      {/* mode picker - same chip row as the genre picker upstream */}
       <div style={{ margin: "0 0 18px" }}>
         <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: ink.muted, fontWeight: 700, marginBottom: 9 }}>
           Tell us what you like
@@ -391,7 +415,7 @@ export default function Dashboard({ dashboard, givens }) {
       {mode === "swipe" && (
         <div style={{ margin: "0 0 26px" }}>
           <div style={{ fontSize: 12, color: ink.muted, marginBottom: 10 }}>
-            Left is no, right is yes, up is “haven’t seen it”. Arrow keys work too.
+            Left is no, right is yes, up is \u201chaven\u2019t seen it\u201d. Arrow keys work too.
           </div>
           {card ? (
             <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -424,7 +448,7 @@ export default function Dashboard({ dashboard, givens }) {
                 style={{ font: "inherit", cursor: "pointer", border: `1px solid ${ink.track}`, background: ink.surface,
                          color: GOOD, borderRadius: 8, padding: "60px 16px", fontSize: 22, fontWeight: 700 }}>✓</button>
             </div>
-          ) : <div style={{ color: ink.muted, fontSize: 13 }}>That’s the whole deck. Your list is below.</div>}
+          ) : <div style={{ color: ink.muted, fontSize: 13 }}>That\u2019s the whole deck. Your list is below.</div>}
         </div>
       )}
 
@@ -435,8 +459,9 @@ export default function Dashboard({ dashboard, givens }) {
             onChange={(e) => {
               setQ(e.target.value); setPerson("");
               const v = e.target.value;
-              gTitle.set(v ? filters.contains(v) : "");
-              gName.set(v ? filters.contains(v) : "");
+              // the model lowercases both sides, so send a lowercased term
+              gTitle.set(v ? filters.contains(v.toLowerCase()) : "");
+              gName.set(v ? filters.contains(v.toLowerCase()) : "");
             }}
             placeholder="Search films, shows and people…"
             style={{ font: "inherit", fontSize: 14, padding: "8px 11px", borderRadius: 7, width: "min(420px, 100%)",
@@ -448,7 +473,7 @@ export default function Dashboard({ dashboard, givens }) {
               <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                 {(people.rows || []).slice(0, 12).map((r) => (
                   <button key={r.person} type="button"
-                    onClick={() => { setPerson(r.person); gName.set(filters.oneOf(r.person)); }}
+                    onClick={() => { setPerson(r.person); gPerson.set(filters.oneOf(r.person)); }}
                     style={{ font: "inherit", fontSize: 12.5, cursor: "pointer", padding: "5px 9px", borderRadius: 7,
                              background: person === r.person ? ink.accent : ink.surface,
                              color: person === r.person ? "#fff" : ink.text2,
@@ -487,13 +512,25 @@ export default function Dashboard({ dashboard, givens }) {
           </span>
         </div>
         {rated === 0 ? (
-          <div style={{ color: ink.muted, fontSize: 13 }}>
-            Nothing rated yet. Tap a few posters above — ten takes about five seconds.
+          <div>
+            <div style={{ color: ink.muted, fontSize: 13, marginBottom: 12 }}>
+              Nothing rated yet, so this is simply what most people have watched. Tap a few posters above
+              and it becomes yours - ten takes about five seconds.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, ${TILE_W}px)`, gap: 14 }}>
+              {/* deliberately NOT the same titles as the grid above: repeating
+                  the visible 48 made the section read as a rendering bug rather
+                  than as a starting point */}
+              {pool.slice(48, 62).map((r) => (
+                <Tile key={"cold" + r.tconst} ink={ink} row={r} offers={offersFor[r.tconst]}
+                      onOpen={() => { setOpen(r); gDetail.set(filters.oneOf(r.tconst)); }} />
+              ))}
+            </div>
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, ${TILE_W}px)`, gap: 14 }}>
             {recommended.slice(0, 28).map((r) => (
-              <Tile key={r.tconst} ink={ink} row={r} offers={offersFor[r.tconst]} onOpen={() => setOpen(r)} />
+              <Tile key={r.tconst} ink={ink} row={r} offers={offersFor[r.tconst]} onOpen={() => { setOpen(r); gDetail.set(filters.oneOf(r.tconst)); }} />
             ))}
           </div>
         )}
@@ -511,7 +548,7 @@ export default function Dashboard({ dashboard, givens }) {
               {open.start_year ? Math.round(num(open.start_year)) : ""} · ★ {num(open.average_rating).toFixed(1)} ·{" "}
               {TYPE_LABEL[open.title_type] || open.title_type} · {compact(num(open.num_votes))} ratings
             </div>
-            <Availability ink={ink} offers={offersFor[open.tconst]} />
+            <Availability ink={ink} offers={detail.rows || []} />
             <button type="button" onClick={() => setOpen(null)}
               style={{ marginTop: 16, font: "inherit", fontSize: 12.5, cursor: "pointer", padding: "6px 11px",
                        borderRadius: 7, background: ink.surface, color: ink.text2, border: `1px solid ${ink.track}` }}>Close</button>

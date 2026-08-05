@@ -29,6 +29,10 @@ query: recommendations is scoring -> {
     average_rating is title.averageRating
     num_votes is title.numVotes
     director is title.directors
+    // was missing entirely: the list rendered grey placeholders under a wall of
+    // real posters and read as broken rather than as a different section
+    poster is pick null when poster.poster_path is null
+      else concat('https://image.tmdb.org/t/p/w154', poster.poster_path)
   aggregate:
     fit
     genre_fit
@@ -66,7 +70,9 @@ query: seed_titles is movies -> {
 // --- search (F6) ------------------------------------------------------------
 #" Find a specific title to rate
 query: search_titles is movies -> {
-  where: primaryTitle ~ $TITLE
+  // lowercased both sides: `batman` returned 0 while `Batman` returned 27,
+  // and the failure was silent -- no result, no empty state, no hint why
+  where: lower(primaryTitle) ~ $TITLE
   group_by:
     tconst
     primary_title is primaryTitle
@@ -80,15 +86,33 @@ query: search_titles is movies -> {
 }
 
 // --- availability (F1) ------------------------------------------------------
-#" Where to watch the recommended titles
+#" One row per title: the streaming services it is on, for the poster mark.
+// Returning every offer row meant 220,963 rows, which the runtime truncates --
+// so most posters silently lost their badge. Collapsing to one row per title
+// makes coverage complete AND the payload an order of magnitude smaller.
 query: availability is providers -> {
-  group_by:
-    imdb_id
-    offer_kind
-    provider_name
-    logo_path
-    link
-    attribution
+  where: offer_kind = 'flatrate'
+  group_by: imdb_id
+  aggregate:
+    logos is string_agg(logo_path, '|')
+    names is string_agg(provider_name, ', ')
+    attribution is max(attribution)
+    votes is title.numVotes.max()
+  // ⛔ THE RUNTIME CAPS A RESULT AT 5,000 ROWS, whatever `limit` says --
+  // measured, not assumed. 15,343 titles have streaming, so a third get
+  // through and WHICH third was arbitrary: the browser was handed obscure
+  // titles while 42 of the 48 most-voted posters on screen lost a badge they
+  // had every right to. Ordering by popularity makes the 5,000 that survive
+  // the ones actually being looked at. A truncated result that still renders
+  // is the worst kind of bug -- nothing fails, it is just quietly wrong.
+  order_by: votes desc
+  limit: 5000
+}
+
+#" Every viewing option for ONE title, for the detail view
+query: availability_detail is providers -> {
+  where: imdb_id ~ $DETAIL_ID
+  group_by: imdb_id, offer_kind, provider_name, logo_path, link, attribution
   order_by: provider_name
 }
 
@@ -100,7 +124,7 @@ query: availability is providers -> {
 // rate, which is the honest version of "seed from a person" (CHARTER F4).
 #" Find a person
 query: search_people is movies -> {
-  where: name ~ $NAME
+  where: lower(name) ~ $NAME
   group_by: person is name
   aggregate:
     titles is title_count
@@ -111,7 +135,7 @@ query: search_people is movies -> {
 
 #" Titles featuring the named person, to rate
 query: titles_by_person is movies -> {
-  where: name ~ $NAME
+  where: name ~ $PERSON_EXACT
   group_by:
     tconst
     primary_title is primaryTitle

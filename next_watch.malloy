@@ -45,10 +45,22 @@ given:
   TITLE_TYPE :: filter<string> is f''
   # label="Minimum votes"
   MIN_VOTES :: filter<number> is f'>= 40000'
+  // which title's full viewing options to fetch; sentinel so the un-opened
+  // state returns nothing rather than every offer for every title
+  # label="Detail title"
+  DETAIL_ID :: filter<string> is f'__none__'
+  // the exact person picked from the results, kept separate from the
+  // lowercased search term
+  # label="Person"
+  PERSON_EXACT :: filter<string> is f'__none__'
 
 // Availability, keyed by title. Every row carries JustWatch's attribution
 // because TMDB requires the credit on each media item, not once in a footer.
 source: providers is watch_providers_table extend {
+  // joined so availability can be ordered by popularity -- see the row cap
+  // documented on the availability query
+  join_one: title is titles_table on imdb_id = title.tconst
+
   measure:
     offer_count is count()
     provider_count is count() { where: offer_kind = 'flatrate' }

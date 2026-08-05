@@ -1,5 +1,5 @@
 import {movies, NAME, TITLE, GENRE, name_options, titles_per_year} from './imdb.malloy'
 // FORK ADDITION: the recommender's sources and controls.
-import {scoring, taste_features, providers, LIKED, DISLIKED, TITLE_TYPE, MIN_VOTES} from './next_watch.malloy'
+import {scoring, taste_features, providers, LIKED, DISLIKED, TITLE_TYPE, MIN_VOTES, DETAIL_ID, PERSON_EXACT} from './next_watch.malloy'
 export {movies, NAME, TITLE, GENRE, name_options, titles_per_year}
-export {scoring, taste_features, providers, LIKED, DISLIKED, TITLE_TYPE, MIN_VOTES}
+export {scoring, taste_features, providers, LIKED, DISLIKED, TITLE_TYPE, MIN_VOTES, DETAIL_ID, PERSON_EXACT}
