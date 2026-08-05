@@ -227,9 +227,13 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     });
     if (!geom) note("swipe-card", "no card rendered");
     else {
-      // 0.70, raised from 0.55 after the rater measured 74vh as "666 of 900"
-      // and called the desktop card the single most likely repeat complaint.
-      if (geom.h < geom.vh * 0.70) note("swipe-card", `card is ${geom.h}px of a ${geom.vh}px viewport, not nearly full screen`);
+      // ⛔ 0.78, and the history of this number is the point. It was 0.55, then
+      // 0.70 when the card was at 0.82 — so when a later fix quietly shrank the
+      // card to 0.73 this check PASSED and certified the regression. A
+      // threshold set comfortably below whatever the code currently does will
+      // ratify anything the code does next. It is now set just under the
+      // intended 0.82, so a shrink fails instead of being blessed.
+      if (geom.h < geom.vh * 0.78) note("swipe-card", `card is ${geom.h}px of a ${geom.vh}px viewport (${Math.round(geom.h / geom.vh * 100)}%), not nearly full screen`);
       else ok(`card is ${geom.h}px of ${geom.vh} (nearly full screen)`);
       if (geom.top < 0 || geom.bottom > geom.vh + 2) note("swipe-card", `card runs off screen (${geom.top}..${geom.bottom} of ${geom.vh})`);
       else ok("card sits fully on screen");
@@ -396,7 +400,12 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
 
     // THE MOBILE FOLD. Sizing the card to fill the screen pushed the card's own
     // title, its skip button and its disclaimer BELOW the fold at 390x844.
-    const m = await b.newPage({ viewport: { width: 390, height: 844 } });
+    // ⚑ EMULATED, not merely narrow. The fold bug presented as emulation-only
+    // and was written off once as an emulator artifact; it was a race between
+    // the one-shot scrollIntoView and the swipe-mode relayout. A plain narrow
+    // viewport does not reproduce it — `isMobile`/`hasTouch` does.
+    const mctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const m = await mctx.newPage();
     await m.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await m.waitForTimeout(17000);
     await m.getByRole("button", { name: "Swipe" }).click();
@@ -405,16 +414,20 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       const c = document.querySelector('div[style*="aspect-ratio"]');
       if (!c) return null;
       const r = c.getBoundingClientRect(), s = c.parentElement.getBoundingClientRect();
-      return { w: Math.round(r.width), bot: Math.round(s.bottom), vh: window.innerHeight, vw: window.innerWidth };
+      return { w: Math.round(r.width), h: Math.round(r.height), bot: Math.round(s.bottom),
+               vh: window.innerHeight, vw: window.innerWidth };
     });
-    if (!geo) note("mobile-stage", "no card rendered at 390x844");
+    if (!geo) note("mobile-stage", "no card rendered at 390x844 (emulated)");
     else {
       if (geo.bot > geo.vh) note("mobile-stage", `the stage runs ${geo.bot - geo.vh}px past the fold (name/skip/disclaimer hidden)`);
-      else ok(`the whole mobile stage fits the fold (${geo.bot} of ${geo.vh})`);
+      else ok(`the whole mobile stage fits the fold (${geo.bot} of ${geo.vh}, emulated)`);
       if (geo.w < geo.vw * 0.85) note("mobile-stage", `card is only ${Math.round(geo.w / geo.vw * 100)}% of width, not near-full-bleed`);
       else ok(`the mobile card is near-full-bleed (${Math.round(geo.w / geo.vw * 100)}% of width)`);
+      // the same shrink-ratification trap applies to height on mobile
+      if (geo.h < geo.vh * 0.70) note("mobile-stage", `mobile card is only ${Math.round(geo.h / geo.vh * 100)}% of viewport height`);
+      else ok(`the mobile card fills ${Math.round(geo.h / geo.vh * 100)}% of viewport height`);
     }
-    await m.close();
+    await m.close(); await mctx.close();
   }
 
   // The class reopened in dimensions neither the suite nor the rater had ever

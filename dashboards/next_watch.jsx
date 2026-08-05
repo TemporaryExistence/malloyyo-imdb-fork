@@ -380,6 +380,13 @@ function Badge({ color, ch }) {
 // dimension "nearly full screen" can mean here, and it should use all of it.
 // The ceiling is what still leaves room for the title and the skip button
 // beneath without pushing them under the fold (see the scroll-into-view note).
+// ⛔ THE RESERVE IS MEASURED, NOT GUESSED. A first pass at the fold problem
+// reserved 240px (desktop) and 250px (narrow) for the chrome under the card.
+// The real chrome is 117px and 201px. So the picture shrank to 73% / 66% of the
+// viewport — below where it started — with 84-144px sitting unused at every
+// size, against Andrew's verbatim "the picture should be nearly full screen".
+// Shrinking the thing he asked to be bigger, to solve a problem that needed
+// half as much room, is the kind of fix that is worse than the bug.
 // Desktop and mobile need different answers to "nearly full screen", and using
 // one number regressed mobile: at 82vh a 390x844 phone put the card's own TITLE,
 // the "Not seen" button and the disclaimer BELOW THE FOLD — a card sized to fill
@@ -387,8 +394,8 @@ function Badge({ color, ch }) {
 // ~92% of the WIDTH, which is the near-full-bleed the complaint was about; the
 // height has to leave room for the rest of the stage. Both values are measured
 // against the rendered page, not chosen.
-const CARD_H_WIDE = "min(82vh, 820px, calc(100vh - 240px))";
-const CARD_H_NARROW = "min(68vh, 560px, calc(100vh - 250px))";
+const CARD_H_WIDE = "min(82vh, 820px, calc(100vh - 145px))";
+const CARD_H_NARROW = "min(78vh, 660px, calc(100vh - 220px))";
 
 // Inline styles cannot carry a media query, and flex-wrap alone put the ✕
 // ABOVE the card and the ✓ off the bottom of the screen at 390px. So the
@@ -527,7 +534,12 @@ function SwipeStage({ ink, kind, image, title, subtitle, meta, mark, onLike, onD
     }}>
       {!narrow && <Side dir="down" label={`Not for me: ${title}`} color={BAD} ch="✕" />}
 
-      <div style={{ textAlign: "center", maxWidth: "min(92vw, 560px)" }}>
+      {/* data-stage marks the part that MUST be on screen: picture, name, skip,
+          disclaimer. The scroll used to target the whole swipe section, chip row
+          included, which is taller than a laptop viewport — so it decided the
+          stage "does not fit", aligned the top, and pushed the foot off. The
+          chips are not the thing that has to be visible. */}
+      <div data-stage style={{ textAlign: "center", maxWidth: "min(92vw, 560px)" }}>
         <div
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
           onPointerCancel={() => { start.current = null; setDrag(null); }}
@@ -952,14 +964,40 @@ export default function Dashboard({ dashboard, givens }) {
   // height the title, the skip button and the No/Yes affordance were all under
   // the fold. Centre the stage when swipe mode opens. Once only -- re-centring
   // on every card would yank the page around mid-swipe.
+  // ⛔ THIS USED TO RACE THE RELAYOUT. It measured in the same frame the mode
+  // changed, so on a phone it centred on geometry that was still the OLD
+  // layout's and landed ~134px short, hiding "Not seen" and the disclaimer. It
+  // presented as an emulation-only bug; it was a race, and re-running it landed
+  // correctly every time. Measure after two frames, then check once more after
+  // the swipe-mode content has settled.
   const stageRef = React.useRef(null);
   React.useEffect(() => {
-    if (mode !== "swipe" || !stageRef.current) return;
-    const el = stageRef.current;
-    const r = el.getBoundingClientRect();
-    if (r.bottom > window.innerHeight || r.top < 0) {
-      el.scrollIntoView({ block: "center", behavior: "smooth" });
-    }
+    if (mode !== "swipe") return;
+    // `block:"center"` left the foot flush with the fold, so the disclaimer sat
+    // 1px off-screen at three common desktop sizes — and re-tuning the height
+    // reserve only moved which three. A `window.scrollBy` delta was worse
+    // still: this page scrolls inside a CONTAINER, not the window, so scrollBy
+    // moved nothing. scrollIntoView finds the real scroller, and scroll-margin
+    // is the part that makes the margin a guarantee instead of arithmetic.
+    const PAD = 16;
+    const center = () => {
+      const root = stageRef.current;
+      if (!root) return;
+      const el = root.querySelector("[data-stage]") || root;
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      if (r.top >= PAD && r.bottom <= vh - PAD) return;
+      const tallerThanScreen = r.height + PAD * 2 > vh;
+      el.style.scrollMarginTop = PAD + "px";
+      el.style.scrollMarginBottom = PAD + "px";
+      // Taller than the viewport: align the TOP, so the picture and its name
+      // stay together. Otherwise align the FOOT, which is what was being lost.
+      el.scrollIntoView({ block: tallerThanScreen ? "start" : "end", behavior: "smooth" });
+    };
+    let a, c;
+    a = requestAnimationFrame(() => { c = requestAnimationFrame(center); });
+    const t = window.setTimeout(center, 400);
+    return () => { cancelAnimationFrame(a); cancelAnimationFrame(c); window.clearTimeout(t); };
   }, [mode, swipeKind]);
 
   const [copied, setCopied] = React.useState(null);
