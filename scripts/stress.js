@@ -275,6 +275,36 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       note("search-empty", "the empty state did not clear when results returned");
     else ok("the empty state clears when results return");
 
+    // 7. THIN-PROFILE RANKING. With ONE liked title, genre_fit spans ~5% while
+    // the cosine denominator spans ~47%, so the denominator decided the order:
+    // The Counselor (genre_fit 5.74) ranked FIRST, above Kingdom of Heaven and
+    // First Knight (both 6.03). Rating one title must put the FULL genre
+    // matches on top. Asserted unconditionally — an earlier version of this
+    // check used indexOf and silently passed when the title was absent.
+    await sbox.fill("gladiator");
+    await p.waitForTimeout(6000);
+    const g1 = p.locator('img[alt^="Poster for"]').first();
+    if ((await g1.getAttribute("alt")) !== "Poster for Gladiator") {
+      note("thin-rank", "could not seed the single-like case (Gladiator not first in search)");
+    } else {
+      await g1.click();
+      await p.waitForTimeout(9000);
+      const list = await p.evaluate(() => {
+        const grids = [...document.querySelectorAll("div")].filter((d) =>
+          d.style && d.style.gridTemplateColumns && d.style.gridTemplateColumns.includes("103px"));
+        const last = grids[grids.length - 1];
+        return [...last.children].map((c) => c.children[1] && c.children[1].textContent).filter(Boolean);
+      });
+      const FULL = ["Robin Hood", "King Arthur", "Kingdom of Heaven", "First Knight", "Exodus: Gods and Kings"];
+      const top4 = list.slice(0, 4);
+      const allFull = top4.length === 4 && top4.every((t) => FULL.indexOf(t) !== -1);
+      if (!allFull) note("thin-rank", `top 4 from one like are not all full-genre matches: ${top4.join(", ")}`);
+      else ok(`one like ranks full genre matches first (${top4.join(", ")})`);
+      const cIdx = list.indexOf("The Counselor");
+      if (cIdx !== -1 && cIdx < 5) note("thin-rank", `The Counselor is back at position ${cIdx} (short-vector bias)`);
+      else ok("the short-vector bias is gone (The Counselor is not top-5)");
+    }
+
     // 6. TMDB requires the JustWatch credit on EACH media item. It lived only
     // in a `title=` tooltip, which a touch device cannot open.
     const credit = await p.evaluate(() =>

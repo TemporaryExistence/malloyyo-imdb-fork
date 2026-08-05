@@ -761,7 +761,31 @@ export default function Dashboard({ dashboard, givens }) {
               + Math.log1p(num(r.shared_cast)) * 0.06
               + num(r.average_rating) * 0.004,
       }))
-      .sort((a, b) => b._score - a._score);
+      // ⚑ THIN-PROFILE ORDERING. The comment above says "genre agreement
+      // carries the ranking". With a RICH liked set that is true, because
+      // genre_fit spans a wide range. With ONE or TWO liked titles it is
+      // measurably FALSE: for a single like on Gladiator, genre_fit spans only
+      // 5.74..6.03 (5%) while the candidate's own vector length spans 17..25
+      // (47%), so the cosine denominator, not the signal, decides the order.
+      // Measured consequence: The Counselor (genre_fit 5.74, norm 17.1) ranked
+      // FIRST, above Kingdom of Heaven (6.03, norm 21.4) and First Knight
+      // (6.03, norm 24.1) — a candidate with strictly LOWER genre agreement
+      // winning purely by having fewer features. That is the short-vector bias
+      // the cosine was introduced to prevent, reappearing from the other side.
+      //
+      // So below three liked titles, order by genre agreement FIRST and use the
+      // cosine only to break ties within equal agreement. Gladiator then leads
+      // with the five full-match historical epics (Robin Hood, King Arthur,
+      // Kingdom of Heaven, Exodus, First Knight) and The Counselor falls to 6th.
+      //
+      // Deliberately NOT applied to rich profiles: measured against the
+      // validated Coen/Tarantino five-title set it is a lateral move, not an
+      // improvement, and that path is the one that was validated against the
+      // data before any UI existed. Narrow the fix to the regime where it was
+      // measured to help; do not re-tune the regime that already works.
+      .sort((a, b) => (liked.length < 3 && Math.abs(num(a.genre_fit) - num(b.genre_fit)) > 1e-9
+        ? num(b.genre_fit) - num(a.genre_fit)
+        : b._score - a._score));
     // Titles carried in by a liked PERSON, appended after the feature-scored
     // ones. They earn their place on the person alone, so they are not scored
     // against the genre profile and must not outrank things that were.
