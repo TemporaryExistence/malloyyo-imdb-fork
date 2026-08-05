@@ -417,6 +417,112 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     await m.close();
   }
 
+  // The class reopened in dimensions neither the suite nor the rater had ever
+  // varied: the SIGN of the profile, a viewport MATRIX rather than two widths,
+  // and session HISTORY (a stale closure that reproduced 6/6 on one path and
+  // 0/4 on a clean one). Vary those here, not just the known list.
+  console.log("\n[6e] profile sign, session history, viewport matrix, and swipe feel");
+  {
+    const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(17000);
+    await p.getByRole("button", { name: "Swipe" }).click();
+    await p.waitForTimeout(2500);
+
+    // A DISLIKE-ONLY PROFILE. One real left-half click from cold took the list
+    // from 28 tiles to 0, printed "Nothing matches those filters." with no
+    // filter set, and unmounted the export — on the most natural first gesture
+    // the deck offers.
+    const cardBox = await p.locator('div[style*="aspect-ratio"]').first().boundingBox();
+    await p.mouse.click(cardBox.x + cardBox.width * 0.25, cardBox.y + cardBox.height / 2);
+    await p.waitForTimeout(7000);
+    const neg = await p.evaluate(() => ({
+      tiles: document.querySelectorAll('div[aria-label^="Open "]').length,
+      copy: [...document.querySelectorAll("button")].filter((x) => /^Copy (link|list)$/.test(x.textContent)).length,
+      txt: document.body.innerText,
+    }));
+    if (neg.tiles < 10) note("negative-only", `a dislike-only profile left ${neg.tiles} tiles`);
+    else if (neg.copy !== 2) note("negative-only", `the export vanished (${neg.copy}/2 copy buttons)`);
+    else if (/Nothing matches those filters/.test(neg.txt)) note("negative-only", "claims a filter matched nothing when none is set");
+    else ok(`a dislike-only profile keeps a list (${neg.tiles}) and its export`);
+
+    // STALE CLOSURE: arrow keys leaking through the modal to rate the card
+    // behind it. Needs the SESSION HISTORY that produced it, not a fresh load.
+    await p.getByRole("button", { name: "Grid" }).click(); await p.waitForTimeout(2000);
+    await p.locator('div[aria-label^="Open "]').first().click(); await p.waitForTimeout(3000);
+    await p.keyboard.press("Escape"); await p.waitForTimeout(1200);
+    await p.getByRole("button", { name: "Swipe" }).click(); await p.waitForTimeout(2500);
+    const cA = await p.evaluate(() => (document.body.innerText.match(/\d+ liked · \d+ not for you/) || [""])[0]);
+    await p.getByRole("button", { name: "Grid" }).click(); await p.waitForTimeout(2000);
+    await p.locator('div[aria-label^="Open "]').first().click(); await p.waitForTimeout(3000);
+    for (let i = 0; i < 4; i++) { await p.keyboard.press("ArrowRight"); await p.waitForTimeout(350); }
+    await p.waitForTimeout(2500);
+    const cB = await p.evaluate(() => (document.body.innerText.match(/\d+ liked · \d+ not for you/) || [""])[0]);
+    if (cA !== cB) note("modal-keys", `arrow keys rated the card behind the modal (${cA} -> ${cB})`);
+    else ok("arrow keys do not leak through the detail modal");
+    await p.close();
+
+    // SWIPE FEEL. Andrew: "the image of the actor moves away, then comes back,
+    // then lags for a moment, THEN it changes." Sample every frame: once the
+    // outgoing card has flown out, it must never return to centre.
+    const f = await b.newPage({ viewport: { width: 1440, height: 900 } });
+    await f.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await f.waitForTimeout(17000);
+    await f.getByRole("button", { name: "Swipe" }).click();
+    await f.waitForTimeout(3000);
+    await f.evaluate(() => {
+      window.__s = []; const t0 = performance.now();
+      const tick = () => {
+        const c = document.querySelector('div[style*="aspect-ratio"]');
+        if (c) {
+          const m = new DOMMatrixReadOnly(getComputedStyle(c).transform);
+          const img = c.querySelector("img");
+          window.__s.push({ t: Math.round(performance.now() - t0), x: Math.round(m.m41),
+            name: c.parentElement.children[1] ? c.parentElement.children[1].textContent : "",
+            ready: !!(img && img.complete && img.naturalWidth > 20) });
+        }
+        if (performance.now() - t0 < 2200) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    const fb = await f.locator('div[style*="aspect-ratio"]').first().boundingBox();
+    await f.mouse.click(fb.x + fb.width * 0.75, fb.y + fb.height / 2);
+    await f.waitForTimeout(2600);
+    const samples = await f.evaluate(() => window.__s);
+    const firstName = samples[0].name;
+    let flown = false, bounced = false;
+    for (const s of samples) {
+      if (s.name === firstName && Math.abs(s.x) > 200) flown = true;
+      if (flown && s.name === firstName && Math.abs(s.x) < 50) { bounced = true; break; }
+    }
+    const settled = samples.find((s) => s.name !== firstName && s.ready && Math.abs(s.x) < 20);
+    if (bounced) note("swipe-feel", "the outgoing card flies out and then animates BACK before the next one arrives");
+    else if (!settled) note("swipe-feel", "the next card never settled with a decoded image inside 2.2s");
+    else if (settled.t > 1200) note("swipe-feel", `the next card took ${settled.t}ms to settle`);
+    else ok(`the swipe swaps cleanly, next card decoded in ${settled.t}ms`);
+    await f.close();
+
+    // VIEWPORT MATRIX, not two widths. The disclaimer the charter requires on
+    // screen was clipped at four common desktop sizes that were never checked.
+    for (const [w, h] of [[1366, 768], [1280, 720], [1024, 768], [414, 896]]) {
+      const q = await b.newPage({ viewport: { width: w, height: h } });
+      await q.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+      await q.waitForTimeout(17000);
+      await q.getByRole("button", { name: "Swipe" }).click();
+      await q.waitForTimeout(4000);
+      const g = await q.evaluate(() => {
+        const c = document.querySelector('div[style*="aspect-ratio"]');
+        if (!c) return null;
+        const s = c.parentElement.getBoundingClientRect();
+        return { bot: Math.round(s.bottom), vh: window.innerHeight };
+      });
+      if (!g) note("fold-matrix", `${w}x${h}: no card rendered`);
+      else if (g.bot > g.vh) note("fold-matrix", `${w}x${h}: stage runs ${g.bot - g.vh}px past the fold`);
+      else ok(`${w}x${h}: whole stage above the fold (${g.bot}/${g.vh})`);
+      await q.close();
+    }
+  }
+
   console.log("\n[7] internal links resolve");
   const p = await b.newPage({ viewport: { width: 1440, height: 1000 } });
   await p.goto(BASE + "/index.html", { waitUntil: "networkidle", timeout: 90000 });

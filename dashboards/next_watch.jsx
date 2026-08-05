@@ -384,8 +384,8 @@ function Badge({ color, ch }) {
 // ~92% of the WIDTH, which is the near-full-bleed the complaint was about; the
 // height has to leave room for the rest of the stage. Both values are measured
 // against the rendered page, not chosen.
-const CARD_H_WIDE = "min(82vh, 820px)";
-const CARD_H_NARROW = "min(68vh, 560px)";
+const CARD_H_WIDE = "min(82vh, 820px, calc(100vh - 240px))";
+const CARD_H_NARROW = "min(68vh, 560px, calc(100vh - 250px))";
 
 // Inline styles cannot carry a media query, and flex-wrap alone put the ✕
 // ABOVE the card and the ✓ off the bottom of the screen at 390px. So the
@@ -410,16 +410,33 @@ function SwipeStage({ ink, kind, image, title, subtitle, meta, mark, onLike, onD
   const start = React.useRef(null);
   const COMMIT = 88;
 
-  // A card that changes under an in-flight animation would fire the previous
-  // card's verdict against the next one's id, so the gesture state is reset
-  // whenever the card identity changes.
-  React.useEffect(() => { setDrag(null); setFly(null); }, [title]);
+  // ⛔ THE BOUNCE. Reported by Andrew: "the name immediately changes to the next
+  // actor but the image of the actor moves away, then comes back, then lags for
+  // a moment, THEN it changes."
+  //
+  // Cause: `finish` cleared `fly` in the SAME tick as it applied the verdict. So
+  // the OUTGOING card lost its flown-out transform and animated back to centre
+  // over 180ms, and only then did the parent swap in the next card — whose photo
+  // then had to be fetched from TMDB. Three visible stages for one swipe.
+  //
+  // Fix is ordering, not duration: `fly` is cleared ONLY when the card identity
+  // actually changes, and in a LAYOUT effect so the incoming card is painted at
+  // centre rather than painted flown-out and animated back.
+  React.useLayoutEffect(() => { setDrag(null); setFly(null); }, [title]);
+
+  // Safety net: if the card does NOT change (deck exhausted, or a verdict that
+  // does not remove the card), the layout effect never fires and the card would
+  // stay invisible. Never reached on the normal path.
+  React.useEffect(() => {
+    if (!fly) return;
+    const t = window.setTimeout(() => setFly(null), 700);
+    return () => window.clearTimeout(t);
+  }, [fly]);
 
   const finish = (dir) => {
     setFly(dir);
     setDrag(null);
     window.setTimeout(() => {
-      setFly(null);
       if (dir === "up") onLike();
       else if (dir === "down") onDislike();
       else onSkip();
@@ -621,8 +638,24 @@ export default function Dashboard({ dashboard, givens }) {
   // "__none__" rather than "" — an empty filter matches everything and the
   // recommendation self-join then tries to score the whole corpus against the
   // whole corpus.
-  React.useEffect(() => { gLiked.set(filters.oneOf(...(liked.length ? liked : ["__none__"]))); }, [liked.join(",")]);
-  React.useEffect(() => { gDisliked.set(filters.oneOf(...(disliked.length ? disliked : ["__none__"]))); }, [disliked.join(",")]);
+  // ⛔ DEBOUNCED, and this is why swipe mode felt slow. Every single swipe wrote
+  // a given, and every given write re-ran the recommendation queries in
+  // DuckDB-WASM. Swiping at a natural pace queued one full query round PER CARD
+  // and they executed in series, so the deck fell further behind the further you
+  // got. Swiping is meant to be the fast input; it was the slowest.
+  // The card itself never waited on these — the deck comes from a local list —
+  // so holding the writes back a beat costs nothing visible and collapses a
+  // burst of swipes into one query round.
+  const useDebouncedGiven = (given, values) => {
+    const key = values.join(",");
+    React.useEffect(() => {
+      const t = window.setTimeout(
+        () => given.set(filters.oneOf(...(values.length ? values : ["__none__"]))), 350);
+      return () => window.clearTimeout(t);
+    }, [key]);
+  };
+  useDebouncedGiven(gLiked, liked);
+  useDebouncedGiven(gDisliked, disliked);
 
   const seeds = useQuery({ query: "seed_titles", givens });
   const recs = useQuery({ query: "recommendations", givens });
@@ -672,12 +705,8 @@ export default function Dashboard({ dashboard, givens }) {
   // should be treated as one."
   const dislikedPeople = React.useMemo(
     () => Object.keys(peopleVerdicts).filter((k) => peopleVerdicts[k] === "down"), [peopleVerdicts]);
-  React.useEffect(() => {
-    gLikedPeople.set(filters.oneOf(...(likedPeople.length ? likedPeople : ["__none__"])));
-  }, [likedPeople.join(",")]);
-  React.useEffect(() => {
-    gDislikedPeople.set(filters.oneOf(...(dislikedPeople.length ? dislikedPeople : ["__none__"])));
-  }, [dislikedPeople.join(",")]);
+  useDebouncedGiven(gLikedPeople, likedPeople);
+  useDebouncedGiven(gDislikedPeople, dislikedPeople);
 
   // availability indexed by title, so a tile lookup is O(1) not a scan
   // one row per title now: logos are a pipe-joined string
@@ -880,8 +909,16 @@ export default function Dashboard({ dashboard, givens }) {
   // the top 60 acclaimed titles are 46 television to 14 films, so a visitor who
   // rates nothing sees a TV list and concludes the tool is for TV. Cycling the
   // types preserves rating order inside each lane and shows both.
-  const list = React.useMemo(() => {
-    if (rated > 0) return recommended;
+  // ⛔ A NEGATIVE-ONLY PROFILE USED TO EMPTY THE PAGE. One left swipe on the
+  // first face — the deck's default mode, and the most natural first gesture
+  // there is — took the list from 28 tiles to 0, printed "Nothing matches those
+  // filters." when no filter was set, and unmounted Copy link and Copy list.
+  // Dislikes alone give the scorer nothing to score TOWARD, so `recommended` is
+  // legitimately empty; the bug is treating "no personalised list yet" as "no
+  // list". CHARTER §4's cold-start rule and §1's criteria 3 and 4 both say a
+  // list must be there. So the fallback is the cold-start list with the
+  // visitor's negatives honoured, and it says which one it is showing.
+  const coldFallback = React.useMemo(() => {
     const lanes = new Map();
     for (const r of popular.rows || []) {
       const k = r.title_type === "movie" ? "film" : "tv";
@@ -896,7 +933,15 @@ export default function Dashboard({ dashboard, givens }) {
       if (!progressed) break;
     }
     return out;
-  }, [rated, popular.rows, recommended]);
+  }, [popular.rows]);
+
+  // Three states, and each says which one it is. `personalised` is the only one
+  // that may claim to be about you.
+  const listMode = rated === 0 ? "cold" : recommended.length ? "personalised" : "negative-only";
+  const list = React.useMemo(() => {
+    if (listMode === "personalised") return recommended;
+    return coldFallback.filter((r) => !verdicts[r.tconst] && !veto.has(r.tconst));
+  }, [listMode, recommended, coldFallback, verdicts, veto]);
 
   // A card sized to fill the screen does not fill the screen if it opens BELOW
   // it: the genre chips and the timeline are ~490px of chrome, so at a laptop
@@ -956,6 +1001,22 @@ export default function Dashboard({ dashboard, givens }) {
   // People vs films vs shows is the visitor's choice, not ours: the deck used
   // to force four person cards before showing a single title.
   const usePersonCard = swipeKind === "people" && personCard;
+
+  // PRELOAD THE NEXT FACES AND POSTERS. The other half of "then lags for a
+  // moment": once the bounce was gone, the swap still waited on a cold TMDB
+  // fetch for the incoming photo. Warming the next few means the next card is
+  // already decoded when it is asked for. Cheap — these are the same CDN URLs
+  // the card is about to request, so it costs no extra bytes overall.
+  React.useEffect(() => {
+    if (mode !== "swipe") return;
+    const nextPeople = (seedPeople.rows || [])
+      .filter((r) => r.nconst && !peopleVerdicts[r.nconst]).slice(0, 4).map((r) => r.photo);
+    const nextTitles = pool.filter((r) => !verdicts[r.tconst]).slice(0, 4)
+      .map((r) => (r.poster ? r.poster.replace("/w154", "/w500") : null));
+    for (const src of [...nextPeople, ...nextTitles]) {
+      if (src) { const im = new window.Image(); im.src = src; }
+    }
+  }, [mode, swipeKind, seedPeople.rows, peopleVerdicts, pool, verdicts]);
 
   const card = React.useMemo(() => {
     const unrated = pool.filter((r) => !verdicts[r.tconst]);
@@ -1057,7 +1118,12 @@ export default function Dashboard({ dashboard, givens }) {
       // Guarding on `card` first meant the keyboard went dead on a PERSON card
       // whenever the title pool happened to be empty -- the person deck was
       // fully populated and the arrow keys did nothing.
-      if (open) return; // a modal is up; its own handler owns the keyboard
+      // A modal is up; its own handler owns the keyboard. `open` MUST stay in
+      // this effect's dependency list — without it the listener closes over a
+      // stale `open`, the guard silently reads false, and arrow keys rate the
+      // card HIDDEN BEHIND the modal. It reproduced 6/6 on one path and 0/4 on
+      // a clean session, which is exactly how a stale closure presents.
+      if (open) return;
       if (!card && !usePersonCard) return;
       if (usePersonCard) {
         if (e.key === "ArrowRight") ratePerson(personCard.nconst, "up");
@@ -1072,7 +1138,7 @@ export default function Dashboard({ dashboard, givens }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mode, card, verdicts, usePersonCard, personCard]);
+  }, [mode, card, verdicts, usePersonCard, personCard, open]);
 
   const Chip = ({ on, onClick, children }) => (
     <button type="button" onClick={onClick}
@@ -1247,8 +1313,8 @@ export default function Dashboard({ dashboard, givens }) {
             Your next watch
           </div>
           <span style={{ fontSize: 12, color: ink.muted }}>
-            {rated === 0
-              ? "top rated, until you rate something"
+            {listMode === "cold" ? "top rated, until you rate something"
+              : listMode === "negative-only" ? "top rated. Like something to make this yours"
               : `${recommended.length} from ${rated} rating${rated === 1 ? "" : "s"}`}
           </span>
           {/* CHARTER §1 success criterion 4: "a list you cannot take with you was
