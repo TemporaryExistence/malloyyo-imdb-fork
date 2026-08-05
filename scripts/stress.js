@@ -227,7 +227,9 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     });
     if (!geom) note("swipe-card", "no card rendered");
     else {
-      if (geom.h < geom.vh * 0.55) note("swipe-card", `card is ${geom.h}px of a ${geom.vh}px viewport, not nearly full screen`);
+      // 0.70, raised from 0.55 after the rater measured 74vh as "666 of 900"
+      // and called the desktop card the single most likely repeat complaint.
+      if (geom.h < geom.vh * 0.70) note("swipe-card", `card is ${geom.h}px of a ${geom.vh}px viewport, not nearly full screen`);
       else ok(`card is ${geom.h}px of ${geom.vh} (nearly full screen)`);
       if (geom.top < 0 || geom.bottom > geom.vh + 2) note("swipe-card", `card runs off screen (${geom.top}..${geom.bottom} of ${geom.vh})`);
       else ok("card sits fully on screen");
@@ -256,6 +258,29 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       if (!disliked) note("swipe-halves", "clicking the left half did not record a dislike");
       else ok("clicking a half records a verdict");
     }
+
+    // 5. A NO-MATCH SEARCH must say so. It rendered silent white space, which
+    // makes a typo indistinguishable from a page that has stopped working.
+    await p.getByRole("button", { name: "Search" }).click();
+    await p.waitForTimeout(800);
+    const sbox = p.locator('input[placeholder*="Search"]');
+    await sbox.fill("zzzzqqq");
+    await p.waitForTimeout(5000);
+    if (!/Nothing matches/.test(await p.evaluate(() => document.body.innerText)))
+      note("search-empty", "a no-match search renders nothing at all");
+    else ok("a no-match search shows an empty state");
+    await sbox.fill("batman");
+    await p.waitForTimeout(5000);
+    if (/Nothing matches/.test(await p.evaluate(() => document.body.innerText)))
+      note("search-empty", "the empty state did not clear when results returned");
+    else ok("the empty state clears when results return");
+
+    // 6. TMDB requires the JustWatch credit on EACH media item. It lived only
+    // in a `title=` tooltip, which a touch device cannot open.
+    const credit = await p.evaluate(() =>
+      [...document.querySelectorAll("img")].filter((i) => /JustWatch/.test(i.getAttribute("alt") || "")).length);
+    if (!credit) note("attribution", "per-item JustWatch credit is hover-only (unreachable on touch)");
+    else ok(`per-item JustWatch credit is in alt text (${credit} marks)`);
     await p.close();
   }
 

@@ -249,11 +249,16 @@ const LOGO = (p) => (p ? "https://image.tmdb.org/t/p/w45" + p : null);
 
 function ProviderMark({ ink, offers }) {
   if (!offers || !offers.logos || !offers.logos.length) return null;
+  // The credit lived ONLY in a `title=` tooltip, which a touch device can never
+  // open -- so on a phone the per-item attribution was effectively absent. The
+  // logo itself carries the licence term, but the text now reaches a screen
+  // reader and a touch user through alt text rather than hover alone.
+  const credit = `${offers.names} - source: JustWatch`;
   return (
-    <div title={`${offers.names} - source: JustWatch`}
+    <div title={credit} aria-label={credit} role="img"
          style={{ position: "absolute", right: 3, bottom: 3, display: "flex", gap: 2 }}>
       {offers.logos.map((p, i) => (
-        <img key={i} src={LOGO(p)} alt="" width={16} height={16} loading="lazy"
+        <img key={i} src={LOGO(p)} alt={i === 0 ? credit : ""} width={16} height={16} loading="lazy"
              style={{ borderRadius: 3, boxShadow: "0 0 0 1px rgba(0,0,0,.35)", background: "#fff", display: "block" }} />
       ))}
     </div>
@@ -367,7 +372,12 @@ function Badge({ color, ch }) {
 // Keyboard already worked and still does; it is handled by the parent.
 // "The picture should be nearly full screen." 62vh capped at 560px was still
 // half the window on a laptop; the cap was doing the limiting, not the vh.
-const CARD_H = "min(74vh, 720px)";
+// Raised again after the rater measured 74vh as 666px of a 900px window: a 2:3
+// portrait card can never fill a 16:9 desktop across, so HEIGHT is the only
+// dimension "nearly full screen" can mean here, and it should use all of it.
+// The ceiling is what still leaves room for the title and the skip button
+// beneath without pushing them under the fold (see the scroll-into-view note).
+const CARD_H = "min(82vh, 820px)";
 
 // Inline styles cannot carry a media query, and flex-wrap alone put the ✕
 // ABOVE the card and the ✓ off the bottom of the screen at 390px. So the
@@ -489,7 +499,7 @@ function SwipeStage({ ink, kind, image, title, subtitle, meta, mark, onLike, onD
     }}>
       {!narrow && <Side dir="down" label={`Not for me: ${title}`} color={BAD} ch="✕" />}
 
-      <div style={{ textAlign: "center", maxWidth: "min(92vw, 480px)" }}>
+      <div style={{ textAlign: "center", maxWidth: "min(92vw, 560px)" }}>
         <div
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
           onPointerCancel={() => { start.current = null; setDrag(null); }}
@@ -500,7 +510,7 @@ function SwipeStage({ ink, kind, image, title, subtitle, meta, mark, onLike, onD
             setHover(e.clientX - r.left < r.width / 2 ? "left" : "right");
           }}
           style={{
-            position: "relative", height: CARD_H, aspectRatio: "2 / 3", maxWidth: "min(92vw, 480px)",
+            position: "relative", height: CARD_H, aspectRatio: "2 / 3", maxWidth: "min(92vw, 560px)",
             margin: "0 auto", borderRadius: 10, overflow: "hidden", background: ink.track,
             border: `1px solid ${ink.track}`, cursor: "grab", touchAction: "none", userSelect: "none",
             transform: `translate(${dx}px, ${dy}px) rotate(${lean * 7}deg)`,
@@ -1047,6 +1057,14 @@ export default function Dashboard({ dashboard, givens }) {
                     onRate={(v) => rate(r.tconst, v)} />
             ))}
           </div>
+          {/* A search that matches nothing rendered silent white space, so a
+              typo was indistinguishable from a page that had stopped working.
+              Same wording the results list already uses. */}
+          {q && !person && (found.rows || []).length === 0 && (people.rows || []).length === 0 && (
+            <div style={{ fontSize: 12.5, color: ink.muted, marginTop: 14 }}>
+              Nothing matches “{q}”.
+            </div>
+          )}
         </div>
       )}
 
