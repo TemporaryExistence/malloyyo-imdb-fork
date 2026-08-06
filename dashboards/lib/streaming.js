@@ -79,9 +79,29 @@ export function canonicalService(name) {
  * listing every option) is the fallback and stays reachable in the popover, so
  * nothing here pretends to be more precise than it is.
  */
+/**
+ * ⛔ THE FALLBACK IS THIRD-PARTY DATA, SO IT IS VALIDATED BEFORE IT BECOMES AN href.
+ * `justwatchLink` comes from TMDB and is stored raw by fetch_watch_providers.py; it is baked
+ * into the parquet and rendered straight into a link. Nothing upstream of us guarantees it is
+ * http(s), and a `javascript:`/`data:` value in that column would become a clickable script.
+ * React 19 blocks some of this, but a framework's incidental guard is not a control we own.
+ * Security gate A3, 2026-08-05.
+ */
+function safeExternal(url) {
+  if (typeof url !== "string" || !url) return null;
+  try {
+    const u = new URL(url, "https://example.invalid");
+    return u.protocol === "http:" || u.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 export function serviceLink(service, title, year, justwatchLink) {
+  const fallback = safeExternal(justwatchLink);
   const q = encodeURIComponent(String(title || "").trim());
-  if (!q) return justwatchLink || null;
+  if (!q) return fallback;
+  justwatchLink = fallback;
   switch (service) {
     case "Netflix":           return `https://www.netflix.com/search?q=${q}`;
     case "Prime Video":       return `https://www.amazon.com/s?k=${q}&i=instant-video`;
