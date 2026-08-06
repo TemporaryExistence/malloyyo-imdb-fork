@@ -1,6 +1,6 @@
 # The page split + layout simplification — the plan, ready to execute
 
-**Status: NOT STARTED.** This is the last outstanding item from Andrew's 2026-08-05 list, and the one he
+**Status: STEPS 1-2 DONE 2026-08-06 · STEPS 3-5 (the page split) NOT STARTED.** This is the last outstanding item from Andrew's 2026-08-05 list, and the one he
 weighted heaviest: *"The site feels 'hacky', not visually beautiful anymore. Too crowded, too many
 different layers of visuals, too many different placement styles, too many different things to click on
 to change the way the dataset is shown on different parts of the screen"* and *"instead of making one
@@ -85,3 +85,68 @@ search for rating titles, but the people page is no longer a gap.
   was skipped.
 - **Source does not live in `docs/`.** The first version of the autofill script was written into
   `docs/assets/` and the next bundle deleted it outright.
+
+
+---
+
+# 2026-08-06 — what was actually done, and THREE premises in this plan that were wrong
+
+Steps 1 and 2 are done. Steps 3-5 (the `rate.html` split) are **not started** — but the ground under
+them changed, so read this before executing them.
+
+## Done
+
+- **§2, the deck is gone.** `next_watch.jsx` **1591 → 1225 lines.** Removed `SwipeStage`, `useNarrow`,
+  `CARD_H_WIDE`/`CARD_H_NARROW`, `deck`/`setDeck`, `swipeKind`, `personCard`/`usePersonCard`,
+  `genreSeen`, the `card` memo, the face/poster preloader, `stageRef`/`recenterRef` + the scroll
+  re-centre effect, the deck keyboard handler, the Swipe chip and the `mode === "swipe"` block.
+- **§2 step 2, the suite was repaired deliberately.** Rating-side assertions retargeted at the grid and
+  search; swipe-side assertions retired here and **recorded as owed** in
+  `/home/andrew/Project/work/products/movie-swipe/OWED-FROM-THE-FORK.md` (six items, none implemented
+  there yet — a green suite here is not coverage that exists somewhere else).
+
+## ⛔ Premise 1 that was wrong — "the person rating path through search stays"
+
+§2 says the deck can go because person ratings survive through search. **They did not: `ratePerson`
+had NO call site outside the deck.** Deleting the deck first would have left `peopleVerdicts`
+permanently empty and killed `recommendations_by_person` and the disliked-person veto (CHARTER F4/F5)
+— while every page still rendered and every remaining assertion still passed.
+
+Built first, then the deck was removed: `search_people` now also groups by `principals.nconst` (person
+verdicts key on the nconst, because `LIKED_PEOPLE`/`DISLIKED_PEOPLE` match `taste_features.feature`),
+and each search People result carries ✕/✓ marks. `ratePerson(nconst, null)` un-rates.
+
+## ⛔ Premise 2 that was wrong — the grid could stand in for the deck
+
+The plan treats the grid as the surviving rating surface. **The grid offered exactly ONE outcome** —
+click toggles "liked". "Not for me" and "not seen" existed only inside the deck. Removing the deck as
+written would have cut the fork's rating vocabulary from three outcomes to one, silently.
+
+`Tile` now carries all three marks (✕ / ✓ / —) wherever rating is the job, and none on the
+recommendation list. `skip()` is a toggle and `undo` records `was`, so "not seen" reverses too.
+
+## ⛔ Premise 3 that was wrong, and it is the one that BLOCKS §3 — "the two halves already share state
+through the URL and `localStorage`, so the split costs no new plumbing"
+
+**Only the streaming-service preference was ever in `localStorage`** (`lib/streaming.js`). Title and
+person verdicts lived in React state plus the URL givens and **nothing else**. Splitting the page on
+that premise would have meant: rate on `rate.html`, click through to `next_watch.html`, arrive with an
+empty profile. A plain reload lost them too — already true, just never visible while one page held
+both jobs.
+
+**Built, so §3 now costs what the plan claimed:** `dashboards/lib/profile.js` persists verdicts, person
+verdicts and "not seen" to `localStorage` (debounced, wrapped for private mode, nothing leaves the
+machine). One seed is computed **before** any state so all three slices initialise together — the old
+seeding ran between the state declarations and could only ever reach `verdicts`, so a shared link
+restored titles and silently dropped people. **Precedence is deliberate: a URL carrying ratings WINS
+over the saved profile**, because that is someone opening a list shared with them, and showing them
+their own profile instead is the same bug from the other side. A new stress assertion proves ratings
+survive a reload.
+
+## So §3-5 are unchanged in shape, and now stand on true ground
+
+Create `rate.html` (grid + search + fuzzy autofill + IMDb import), strip `next_watch.jsx` to the output
+surface (recommendations, "what your ratings are doing", service picker, detail modal, genre picker and
+timeline — the last two filter the OUTPUT and belong on one page only, not both). Cross-page links
+should still carry the current givens so a SHARED link keeps working; `localStorage` covers the same
+visitor moving between pages.

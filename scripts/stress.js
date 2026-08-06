@@ -36,37 +36,36 @@ const PAGES = ["index", "genre_pairs", "next_watch", "works_together"];
 // being wrong about the site, not the site being broken.
 const POSTER_PAGES = new Set(["genre_pairs", "next_watch"]);
 
-// ⛔ THE CONSTANTS BELOW ARE A CONTRACT, AND THIS ASSERTS THEY STILL MATCH THE
-// SOURCE. The card-size checks recompute what the CSS intends rather than using
-// a magic ratio, which stops a CSS-only shrink from passing. But the numbers
-// were a hand copy in this file, so weakening the HARNESS alone would have gone
-// green and undetectable — the "threshold parked below what the code does" trap
-// wearing its third disguise. Parsing the source and requiring agreement means:
-// a CSS-only change fails (rendered < intent), a harness-only change fails
-// (here), and changing both is a deliberate edit visible in one diff.
-const CARD_INTENT = { wideVh: 0.82, wideMax: 820, wideReserve: 145,
-                      narrowVh: 0.78, narrowMax: 660, narrowReserve: 220 };
-(function assertCardIntentMatchesSource() {
-  const src = require("fs").readFileSync(__dirname + "/../dashboards/next_watch.jsx", "utf8");
-  const grab = (name) => {
-    const m = src.match(new RegExp(name + '\\s*=\\s*"min\\((\\d+)vh,\\s*(\\d+)px,\\s*calc\\(100vh - (\\d+)px\\)\\)"'));
-    return m ? { vh: +m[1] / 100, max: +m[2], reserve: +m[3] } : null;
-  };
-  const w = grab("CARD_H_WIDE"), n = grab("CARD_H_NARROW");
-  const bad = [];
-  if (!w) bad.push("could not parse CARD_H_WIDE from the component");
-  else if (w.vh !== CARD_INTENT.wideVh || w.max !== CARD_INTENT.wideMax || w.reserve !== CARD_INTENT.wideReserve)
-    bad.push(`CARD_H_WIDE is ${w.vh * 100}vh/${w.max}px/${w.reserve}px, harness expects ${CARD_INTENT.wideVh * 100}vh/${CARD_INTENT.wideMax}px/${CARD_INTENT.wideReserve}px`);
-  if (!n) bad.push("could not parse CARD_H_NARROW from the component");
-  else if (n.vh !== CARD_INTENT.narrowVh || n.max !== CARD_INTENT.narrowMax || n.reserve !== CARD_INTENT.narrowReserve)
-    bad.push(`CARD_H_NARROW is ${n.vh * 100}vh/${n.max}px/${n.reserve}px, harness expects ${CARD_INTENT.narrowVh * 100}vh/${CARD_INTENT.narrowMax}px/${CARD_INTENT.narrowReserve}px`);
-  if (bad.length) {
-    console.log("\nCARD-SIZE CONTRACT BROKEN — the component and this suite disagree:");
-    bad.forEach((b) => console.log("  " + b));
-    console.log("If the change is intended, update BOTH deliberately.\n");
-    process.exit(1);
-  }
-})();
+// ⛑ THE CARD-SIZE CONTRACT MOVED OUT WITH THE DECK (2026-08-06).
+// It asserted `CARD_H_WIDE`/`CARD_H_NARROW` in `next_watch.jsx` matched this
+// harness's intent. Those constants sized the SWIPE CARD, and the swipe deck
+// left the fork for `../movie-swipe` (Watchpile) per CHARTER §7.2 — so the check
+// had no subject left and failed on "could not parse", which is the contract
+// working, not a regression.
+// ⛔ IT WAS NOT TRANSPLANTED, and that is deliberate rather than an omission:
+// Watchpile's `Card` does not use these constants (it sizes its own way), so
+// copying the numbers across would assert a contract that project never agreed
+// to. Standing up the equivalent check there is REAL WORK THAT HAS NOT BEEN
+// DONE — recorded in Watchpile's notes rather than quietly implied by a deleted
+// assertion. The rating-side assertions this suite carried ("not seen" survives
+// interleaved ratings, undo, keyboard) are KEPT and now run against the grid and
+// search, which is where those outcomes live now.
+
+// ⛑ PAGE ISOLATION (2026-08-06). Ratings now persist to localStorage
+// (`nwProfile.v1`), which every page in this suite SHARES because they are all
+// `b.newPage()` on one browser. Without this, a page that rates something leaves
+// the next page starting mid-profile — the list re-renders under the harness and
+// assertions fail on "element never became stable", which is a suite artefact
+// masquerading as a product defect. `addInitScript` runs before the page's own
+// scripts on EVERY navigation, so a reload cannot resurrect a stale profile.
+// ⛔ The persistence test deliberately does NOT use this — it needs the profile
+// to survive its own reload. It clears once by hand instead.
+const PROFILE_KEY = "nwProfile.v1";
+async function cleanPage(b, viewport) {
+  const p = await b.newPage({ viewport });
+  await p.addInitScript((k) => { try { localStorage.removeItem(k); } catch (e) {} }, PROFILE_KEY);
+  return p;
+}
 
 const fails = [];
 const note = (t, m) => { fails.push(`${t}: ${m}`); console.log(`  FAIL  ${t} - ${m}`); };
@@ -103,7 +102,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
 
   console.log("\n[1] every page, desktop 1440");
   for (const pg of PAGES) {
-    const p = await b.newPage({ viewport: { width: 1440, height: 1000 } });
+    const p = await cleanPage(b, { width: 1440, height: 1000 });
     await p.goto(BASE + "/" + pg + ".html", { waitUntil: "networkidle", timeout: 90000 });
     await check(p, "desktop/" + pg, { expectData: POSTER_PAGES.has(pg) });
     await p.close();
@@ -128,7 +127,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
   console.log("\n[4] every genre on the pairs page");
   const GENRES = ["Drama","Comedy","Action","Crime","Romance","Horror","Documentary","Western","Film-Noir","Talk-Show"];
   for (const g of GENRES) {
-    const p = await b.newPage({ viewport: { width: 1440, height: 1000 } });
+    const p = await cleanPage(b, { width: 1440, height: 1000 });
     await p.goto(BASE + "/genre_pairs.html?$GENRE=" + g, { waitUntil: "domcontentloaded", timeout: 90000 });
     await check(p, "genre/" + g, { expectData: false });
     await p.close();
@@ -144,7 +143,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     ["param-flood",   "?" + "x=1&".repeat(200)],
   ];
   for (const [label, q] of HOSTILE) {
-    const p = await b.newPage({ viewport: { width: 1440, height: 1000 } });
+    const p = await cleanPage(b, { width: 1440, height: 1000 });
     await p.goto(BASE + "/genre_pairs.html" + q, { waitUntil: "domcontentloaded", timeout: 90000 }).catch(() => {});
     await check(p, "hostile/" + label, { expectData: false });
     await p.close();
@@ -152,7 +151,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
 
   console.log("\n[6] the recommender actually produces a list");
   {
-    const p = await b.newPage({ viewport: { width: 1440, height: 1100 } });
+    const p = await cleanPage(b, { width: 1440, height: 1100 });
     await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await p.waitForTimeout(16000);
     const tiles = await p.locator('img[alt^="Poster for"]').all();
@@ -166,14 +165,19 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     const m = txt.match(/(\d+) from (\d+) rating/);
     if (!m || Number(m[1]) === 0) note("recommender", "rated 5 titles and got no suggestions");
     else ok("recommender (" + m[0] + ")");
-    // swipe mode must respond to the keyboard, not just to clicks
-    await p.getByRole("button", { name: "Swipe" }).click();
+    // ⛑ RETARGETED FROM THE DECK TO THE GRID (2026-08-06). The assertion is
+    // "rating must not be mouse-only", which is about RATING, not about swiping,
+    // so it survives the deck's departure — it just has to point at where rating
+    // happens now. The grid tile is a real focusable control; Enter toggles it.
+    await p.getByRole("button", { name: "Grid" }).click();
     await p.waitForTimeout(1200);
-    await p.keyboard.press("ArrowRight");
+    const tile = p.locator('[role="button"][aria-label^="Rate "]').first();
+    await tile.focus();
+    await p.keyboard.press("Enter");
     await p.waitForTimeout(2500);
     const t2 = await p.evaluate(() => document.body.innerText);
-    if (!/liked ·/.test(t2)) note("swipe", "arrow key did not register a rating");
-    else ok("swipe keyboard");
+    if (!/liked ·/.test(t2)) note("keyboard-rating", "Enter on a focused grid tile did not register a rating");
+    else ok("rating from the keyboard (grid tile)");
     await p.close();
   }
 
@@ -183,7 +187,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // rendered 28 posterless boxes, search was case-sensitive, and provider
     // marks reached 6 of 48 posters. A suite that cannot see the actual product
     // failing is worse than none, so each is now asserted directly.
-    const p = await b.newPage({ viewport: { width: 1440, height: 1100 } });
+    const p = await cleanPage(b, { width: 1440, height: 1100 });
     await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await p.waitForTimeout(17000);
 
@@ -267,7 +271,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
   // defect, add the assertion that would have caught it.
   console.log("\n[6c] the defects THIS session produced");
   {
-    const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+    const p = await cleanPage(b, { width: 1440, height: 900 });
     await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await p.waitForTimeout(17000);
 
@@ -310,59 +314,21 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     if (exp < 2) note("export", `${exp} of 2 copy buttons present`);
     else ok("list is exportable (copy link + copy list)");
 
-    // 4. THE SWIPE MUST SWIPE, and the card must be BIG and ON SCREEN. It was
-    // two buttons with tick glyphs; then it was 720px tall opening below the
-    // fold, which is the same as invisible.
-    await p.getByRole("button", { name: "Swipe" }).click();
-    await p.waitForTimeout(1500);
-    await p.getByRole("button", { name: "Films" }).click();
-    await p.waitForTimeout(3500);
-    const geom = await p.evaluate(() => {
-      const c = document.querySelector('div[style*="aspect-ratio"]');
-      if (!c) return null;
-      const r = c.getBoundingClientRect();
-      return { h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom), vh: window.innerHeight };
-    });
-    if (!geom) note("swipe-card", "no card rendered");
-    else {
-      // ⛔ NO MAGIC THRESHOLD. The history of this number is the whole point: it
-      // was 0.55, then 0.70 while the card sat at 0.82 — so when a later fix
-      // shrank the card to 0.73, this check PASSED and certified the
-      // regression. Raising it to 0.78 only moved the same trap 4 points.
-      // So it no longer guesses: it recomputes what the CSS INTENDS —
-      // min(82vh, 820px, 100vh - 145px) — and requires the card to actually be
-      // that. A threshold cannot be parked below what the code does if it is
-      // derived from what the code is supposed to do.
-      const wantWide = Math.min(CARD_INTENT.wideVh * geom.vh, CARD_INTENT.wideMax, geom.vh - CARD_INTENT.wideReserve);
-      if (geom.h < wantWide - 3) note("swipe-card", `card is ${geom.h}px where the CSS intends ${Math.round(wantWide)}px (${Math.round(geom.h / geom.vh * 100)}% of ${geom.vh})`);
-      else ok(`card is ${geom.h}px of ${geom.vh} (nearly full screen)`);
-      if (geom.top < 0 || geom.bottom > geom.vh + 2) note("swipe-card", `card runs off screen (${geom.top}..${geom.bottom} of ${geom.vh})`);
-      else ok("card sits fully on screen");
-    }
-    // the affordance must be readable BEFORE the first click
-    const hints = await p.evaluate(() =>
-      [...document.querySelectorAll("span")].filter((s) => /^(✕ No|Yes ✓)$/.test(s.textContent.trim())).length);
-    if (hints < 2) note("swipe-affordance", `${hints} of 2 half-labels visible before the first click`);
-    else ok("both click-half labels are visible up front");
-
-    if (geom) {
-      const cx = (geom.top + geom.bottom) / 2;
-      const card = p.locator('div[style*="aspect-ratio"]').first();
-      const bb = await card.boundingBox();
-      await p.mouse.move(bb.x + bb.width / 2, cx); await p.mouse.down();
-      for (let i = 1; i <= 8; i++) { await p.mouse.move(bb.x + bb.width / 2 + i * 25, cx); await p.waitForTimeout(20); }
-      await p.mouse.up();
-      await p.waitForTimeout(2500);
-      const liked = await p.evaluate(() => /1 liked/.test(document.body.innerText));
-      if (!liked) note("swipe-drag", "dragging the card right did not record a like");
-      else ok("drag right records a like");
-
-      await p.mouse.click(bb.x + bb.width * 0.25, cx);
-      await p.waitForTimeout(2500);
-      const disliked = await p.evaluate(() => /1 not for you/.test(document.body.innerText));
-      if (!disliked) note("swipe-halves", "clicking the left half did not record a dislike");
-      else ok("clicking a half records a verdict");
-    }
+    // 4. ⛑ THE SWIPE ASSERTIONS LEFT WITH THE DECK (2026-08-06).
+    // What stood here asserted the swipe CARD: that it is nearly full screen,
+    // that it sits above the fold, that both click-half labels are readable
+    // before the first click, that dragging right records a like and clicking
+    // the left half records a dislike. Every one of those describes a swipe, and
+    // the swipe deck moved to `../movie-swipe` (Watchpile) per CHARTER §7.2.
+    // ⛔ THEY ARE OWED THERE, NOT DISCHARGED. Watchpile's `Card` is a different
+    // component with its own sizing, so these could not be copied across as
+    // written — porting them is REAL WORK THAT HAS NOT BEEN DONE. It is recorded
+    // in Watchpile's notes so a green suite here is not mistaken for coverage
+    // that exists somewhere. Deleting an assertion because its UI moved, without
+    // saying where it went, is how coverage drops silently.
+    // What is KEPT here is the rating-side half: the keyboard check above (now
+    // against the grid), "not seen" surviving interleaved ratings, undo, and the
+    // person-verdict check — all retargeted at the grid and search.
 
     // 5. A NO-MATCH SEARCH must say so. It rendered silent white space, which
     // makes a typo indistinguishable from a page that has stopped working.
@@ -430,7 +396,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // your browser" — so the test asserts the NETWORK, not just the message.
     // A Letterboxd file must be refused BY NAME; silently importing zero rows
     // from a file the user just handed us is the worst available outcome.
-    const p2 = await b.newPage({ viewport: { width: 1440, height: 1200 } });
+    const p2 = await cleanPage(b, { width: 1440, height: 1200 });
     const uploads = [];
     p2.on("request", (r) => { if (r.method() === "POST" || /upload/i.test(r.url())) uploads.push(r.url()); });
     await p2.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
@@ -463,7 +429,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // every time it regenerates docs/*.html. This check is what catches a build
     // that forgot to run it -- the failure is otherwise silent and looks like
     // "no matches".
-    const wt = await b.newPage({ viewport: { width: 1440, height: 1100 } });
+    const wt = await cleanPage(b, { width: 1440, height: 1100 });
     await wt.goto(BASE + "/works_together.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await wt.waitForTimeout(20000);
     const wtIn = wt.locator('input[list="dash-options-NAME"]');
@@ -530,38 +496,69 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
   // class reopen.
   console.log("\n[6d] the swipe deck's DEFAULT mode, and the mobile fold");
   {
-    const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+    const p = await cleanPage(b, { width: 1440, height: 900 });
     await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await p.waitForTimeout(17000);
-    await p.getByRole("button", { name: "Swipe" }).click();
-    await p.waitForTimeout(2500);
-    const name0 = await p.evaluate(() => {
-      const c = document.querySelector('div[style*="aspect-ratio"]');
-      return c && c.parentElement.children[1] ? c.parentElement.children[1].textContent : "";
-    });
-    // A LEFT SWIPE ON A PERSON REACHED NOTHING: state was set, no given was
-    // written, the counter never moved. Half of every verdict the deck's
-    // default mode collected was discarded in silence.
-    await p.keyboard.press("ArrowLeft");
-    await p.waitForTimeout(4000);
-    let t = await p.evaluate(() => document.body.innerText);
-    if (/nothing rated yet/.test(t)) note("person-dislike", "a left swipe on a person recorded nothing");
-    else if (!/1 people/.test(t)) note("person-dislike", "the disliked person is not counted");
-    else ok("a person dislike registers and is counted");
-    // CHARTER F5 lists Undo under "design rules that are not optional", and the
-    // deck OPENS on People — the one mode that had no Undo at all.
-    if (!/Undo/.test(t)) note("person-undo", "People mode offers no Undo");
-    else {
-      await p.getByRole("button", { name: "Undo" }).click();
-      await p.waitForTimeout(3000);
-      const back = await p.evaluate(() => {
-        const c = document.querySelector('div[style*="aspect-ratio"]');
-        return c && c.parentElement.children[1] ? c.parentElement.children[1].textContent : "";
-      });
-      if (!/nothing rated yet/.test(await p.evaluate(() => document.body.innerText)))
-        note("person-undo", "Undo did not reverse the person verdict");
-      else if (back !== name0) note("person-undo", `Undo did not bring the card back (${back} != ${name0})`);
-      else ok("Undo reverses a person verdict and restores the card");
+    // ⛑ RETARGETED FROM THE DECK TO SEARCH (2026-08-06). The DEFECT this guards
+    // is not "a left swipe did nothing" — it is "a person DISLIKE reaches state
+    // but never the model, so half of every person verdict is discarded in
+    // silence" (CHARTER F5). That defect is about the person-rating PATH, which
+    // still exists; only its UI moved. Rating a person now lives on the ✕/✓ marks
+    // beside each search result, so the assertion points there.
+    await p.getByRole("button", { name: "Search" }).click();
+    await p.waitForTimeout(1200);
+    await p.locator('input[placeholder*="Search"]').fill("Morgan Freeman");
+    await p.waitForTimeout(9000);
+    // ⛑ DISMISS THE AUTOFILL DROPDOWN FIRST. Typing opens the fuzzy suggestion
+    // list, whose <li role="option"> overlays the People row — Playwright reported
+    // "element is visible, enabled and stable" and then "…intercepts pointer
+    // events", i.e. the button was fine and something was ON TOP of it. A real
+    // visitor dismisses it the same way before clicking underneath, so this is the
+    // honest interaction, not a workaround. (Diagnosed by reading the click log
+    // rather than assuming instability — the first two guesses were both wrong.)
+    await p.keyboard.press("Escape");
+    await p.waitForTimeout(600);
+    // ⛑ `data-rate="person"` rather than the aria-label alone: title marks carry
+    // the SAME "Not for me: …" label shape, so a label-only selector picks
+    // whichever is first in the DOM and would quietly assert the wrong surface.
+    const dislikePerson = p.locator('button[data-rate="person"][aria-label^="Not for me: "]').first();
+    if (!(await dislikePerson.count())) {
+      note("person-dislike", "search results offer no way to rate a person — the person path is unreachable");
+    } else {
+      await dislikePerson.waitFor({ state: "visible", timeout: 30000 });
+      // ⛑ WAIT FOR THE LAYOUT TO STOP MOVING, don't force the click. This page
+      // re-queries on a debounce, so the People row can still be settling when the
+      // element is already "visible" — Playwright then retries its actionability
+      // check until it times out, which reads as a product failure and is not one
+      // (measured: the button IS perfectly stable once the page quiesces).
+      // `force: true` would "fix" it by asserting nothing about whether a real
+      // person could click it, so instead: poll the element's own box until two
+      // consecutive reads agree, then click normally.
+      let prevBox = null, settled = false;
+      for (let i = 0; i < 40; i++) {
+        const box = await dislikePerson.boundingBox().catch(() => null);
+        const key = box ? `${Math.round(box.x)},${Math.round(box.y)},${Math.round(box.width)}` : "none";
+        if (key !== "none" && key === prevBox) { settled = true; break; }
+        prevBox = key;
+        await p.waitForTimeout(500);
+      }
+      if (!settled) note("person-dislike", "the person rate mark never acquired a stable box");
+      await dislikePerson.scrollIntoViewIfNeeded().catch(() => {});
+      await dislikePerson.click({ timeout: 30000 });
+      await p.waitForTimeout(4000);
+      let t = await p.evaluate(() => document.body.innerText);
+      if (/nothing rated yet/.test(t)) note("person-dislike", "disliking a person from search recorded nothing");
+      else if (!/1 people/.test(t)) note("person-dislike", "the disliked person is not counted");
+      else ok("a person dislike registers and is counted (from search)");
+      // CHARTER F5 lists Undo under "design rules that are not optional".
+      if (!/Undo/.test(t)) note("person-undo", "a person verdict offers no Undo");
+      else {
+        await p.getByRole("button", { name: "Undo" }).click();
+        await p.waitForTimeout(3000);
+        if (!/nothing rated yet/.test(await p.evaluate(() => document.body.innerText)))
+          note("person-undo", "Undo did not reverse the person verdict");
+        else ok("Undo reverses a person verdict");
+      }
     }
     // A modal with no keyboard exit is a trap.
     await p.getByRole("button", { name: "Grid" }).click();
@@ -575,59 +572,29 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     else ok("Escape closes the detail modal");
     await p.close();
 
-    // THE MOBILE FOLD. Sizing the card to fill the screen pushed the card's own
-    // title, its skip button and its disclaimer BELOW the fold at 390x844.
-    // ⚑ EMULATED, not merely narrow. The fold bug presented as emulation-only
-    // and was written off once as an emulator artifact; it was a race between
-    // the one-shot scrollIntoView and the swipe-mode relayout. A plain narrow
-    // viewport does not reproduce it — `isMobile`/`hasTouch` does.
-    const mctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-    const m = await mctx.newPage();
-    await m.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
-    await m.waitForTimeout(17000);
-    await m.getByRole("button", { name: "Swipe" }).click();
-    await m.waitForTimeout(4000);
-    const geo = await m.evaluate(() => {
-      const c = document.querySelector('div[style*="aspect-ratio"]');
-      if (!c) return null;
-      const r = c.getBoundingClientRect(), s = c.parentElement.getBoundingClientRect();
-      return { w: Math.round(r.width), h: Math.round(r.height), bot: Math.round(s.bottom),
-               vh: window.innerHeight, vw: window.innerWidth };
-    });
-    if (!geo) note("mobile-stage", "no card rendered at 390x844 (emulated)");
-    else {
-      if (geo.bot > geo.vh) note("mobile-stage", `the stage runs ${geo.bot - geo.vh}px past the fold (name/skip/disclaimer hidden)`);
-      else ok(`the whole mobile stage fits the fold (${geo.bot} of ${geo.vh}, emulated)`);
-      if (geo.w < geo.vw * 0.85) note("mobile-stage", `card is only ${Math.round(geo.w / geo.vw * 100)}% of width, not near-full-bleed`);
-      else ok(`the mobile card is near-full-bleed (${Math.round(geo.w / geo.vw * 100)}% of width)`);
-      // Same rule as the desktop check, and for the same reason: 0.70 against
-      // an actual 0.725 was the identical trap one level down. Derived from the
-      // CSS intent, min(78vh, 660px, 100vh - 220px), not from a round number.
-      const wantNarrow = Math.min(CARD_INTENT.narrowVh * geo.vh, CARD_INTENT.narrowMax, geo.vh - CARD_INTENT.narrowReserve);
-      if (geo.h < wantNarrow - 3) note("mobile-stage", `mobile card is ${geo.h}px where the CSS intends ${Math.round(wantNarrow)}px`);
-      else ok(`the mobile card is the full intended ${geo.h}px (${Math.round(geo.h / geo.vh * 100)}% of viewport height)`);
-    }
-    await m.close(); await mctx.close();
+    // ⛑ THE MOBILE-FOLD BLOCK LEFT WITH THE DECK (2026-08-06). It asserted that
+    // the swipe STAGE (card + its title + skip button + disclaimer) fits above
+    // the fold at an EMULATED 390x844, and that the card is near-full-bleed. Both
+    // describe the swipe card, which now lives in `../movie-swipe` (Watchpile).
+    // ⛔ OWED THERE, NOT DISCHARGED — and this one is the most expensive to lose,
+    // because the bug it caught presented as an emulator artifact and was written
+    // off as one once before it was understood to be a race. Watchpile's suite
+    // does not yet emulate a touch viewport at all. Recorded in its notes.
   }
 
-  // The class reopened in dimensions neither the suite nor the rater had ever
-  // varied: the SIGN of the profile, a viewport MATRIX rather than two widths,
-  // and session HISTORY (a stale closure that reproduced 6/6 on one path and
-  // 0/4 on a clean one). Vary those here, not just the known list.
   console.log("\n[6e] profile sign, session history, viewport matrix, and swipe feel");
   {
-    const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+    const p = await cleanPage(b, { width: 1440, height: 900 });
     await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await p.waitForTimeout(17000);
-    await p.getByRole("button", { name: "Swipe" }).click();
+    // A DISLIKE-ONLY PROFILE. One real dislike from cold took the list from 28
+    // tiles to 0, printed "Nothing matches those filters." with no filter set,
+    // and unmounted the export. ⛑ Retargeted 2026-08-06: the defect is about the
+    // PROFILE having only negatives, not about how the negative was entered, so
+    // it now uses the grid tile's ✕ mark. Same state, same assertion.
+    await p.getByRole("button", { name: "Grid" }).click();
     await p.waitForTimeout(2500);
-
-    // A DISLIKE-ONLY PROFILE. One real left-half click from cold took the list
-    // from 28 tiles to 0, printed "Nothing matches those filters." with no
-    // filter set, and unmounted the export — on the most natural first gesture
-    // the deck offers.
-    const cardBox = await p.locator('div[style*="aspect-ratio"]').first().boundingBox();
-    await p.mouse.click(cardBox.x + cardBox.width * 0.25, cardBox.y + cardBox.height / 2);
+    await p.locator('button[data-rate="title"][aria-label^="Not for me: "]').first().click();
     await p.waitForTimeout(7000);
     const neg = await p.evaluate(() => ({
       tiles: document.querySelectorAll('div[aria-label^="Open "]').length,
@@ -641,79 +608,34 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
 
     // STALE CLOSURE: arrow keys leaking through the modal to rate the card
     // behind it. Needs the SESSION HISTORY that produced it, not a fresh load.
+    // ⛑ Retargeted 2026-08-06. The defect class is "keys leak THROUGH the modal
+    // and rate what is behind it", which the deck's arrow keys demonstrated; the
+    // grid's Enter/Space are now the keys that could leak, so those are pressed.
+    // The session-history part is preserved deliberately — the original bug was a
+    // stale closure and reproduced only after a modal had already been opened and
+    // closed once, so a fresh load would not have caught it.
     await p.getByRole("button", { name: "Grid" }).click(); await p.waitForTimeout(2000);
     await p.locator('div[aria-label^="Open "]').first().click(); await p.waitForTimeout(3000);
     await p.keyboard.press("Escape"); await p.waitForTimeout(1200);
-    await p.getByRole("button", { name: "Swipe" }).click(); await p.waitForTimeout(2500);
     const cA = await p.evaluate(() => (document.body.innerText.match(/\d+ liked · \d+ not for you/) || [""])[0]);
-    await p.getByRole("button", { name: "Grid" }).click(); await p.waitForTimeout(2000);
     await p.locator('div[aria-label^="Open "]').first().click(); await p.waitForTimeout(3000);
-    for (let i = 0; i < 4; i++) { await p.keyboard.press("ArrowRight"); await p.waitForTimeout(350); }
+    for (let i = 0; i < 4; i++) { await p.keyboard.press("Enter"); await p.waitForTimeout(350); }
     await p.waitForTimeout(2500);
     const cB = await p.evaluate(() => (document.body.innerText.match(/\d+ liked · \d+ not for you/) || [""])[0]);
-    if (cA !== cB) note("modal-keys", `arrow keys rated the card behind the modal (${cA} -> ${cB})`);
-    else ok("arrow keys do not leak through the detail modal");
+    if (cA !== cB) note("modal-keys", `keys rated a tile behind the modal (${cA} -> ${cB})`);
+    else ok("keys do not leak through the detail modal");
     await p.close();
 
-    // SWIPE FEEL. Andrew: "the image of the actor moves away, then comes back,
-    // then lags for a moment, THEN it changes." Sample every frame: once the
-    // outgoing card has flown out, it must never return to centre.
-    const f = await b.newPage({ viewport: { width: 1440, height: 900 } });
-    await f.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
-    await f.waitForTimeout(17000);
-    await f.getByRole("button", { name: "Swipe" }).click();
-    await f.waitForTimeout(3000);
-    await f.evaluate(() => {
-      window.__s = []; const t0 = performance.now();
-      const tick = () => {
-        const c = document.querySelector('div[style*="aspect-ratio"]');
-        if (c) {
-          const m = new DOMMatrixReadOnly(getComputedStyle(c).transform);
-          const img = c.querySelector("img");
-          window.__s.push({ t: Math.round(performance.now() - t0), x: Math.round(m.m41),
-            name: c.parentElement.children[1] ? c.parentElement.children[1].textContent : "",
-            ready: !!(img && img.complete && img.naturalWidth > 20) });
-        }
-        if (performance.now() - t0 < 2200) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    });
-    const fb = await f.locator('div[style*="aspect-ratio"]').first().boundingBox();
-    await f.mouse.click(fb.x + fb.width * 0.75, fb.y + fb.height / 2);
-    await f.waitForTimeout(2600);
-    const samples = await f.evaluate(() => window.__s);
-    const firstName = samples[0].name;
-    let flown = false, bounced = false;
-    for (const s of samples) {
-      if (s.name === firstName && Math.abs(s.x) > 200) flown = true;
-      if (flown && s.name === firstName && Math.abs(s.x) < 50) { bounced = true; break; }
-    }
-    const settled = samples.find((s) => s.name !== firstName && s.ready && Math.abs(s.x) < 20);
-    if (bounced) note("swipe-feel", "the outgoing card flies out and then animates BACK before the next one arrives");
-    else if (!settled) note("swipe-feel", "the next card never settled with a decoded image inside 2.2s");
-    else if (settled.t > 1200) note("swipe-feel", `the next card took ${settled.t}ms to settle`);
-    else ok(`the swipe swaps cleanly, next card decoded in ${settled.t}ms`);
-    await f.close();
-
-    // VIEWPORT MATRIX, not two widths. The disclaimer the charter requires on
-    // screen was clipped at four common desktop sizes that were never checked.
-    for (const [w, h] of [[1366, 768], [1280, 720], [1024, 768], [414, 896]]) {
-      const q = await b.newPage({ viewport: { width: w, height: h } });
-      await q.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
-      await q.waitForTimeout(17000);
-      await q.getByRole("button", { name: "Swipe" }).click();
-      await q.waitForTimeout(4000);
-      const g = await q.evaluate(() => {
-        const c = document.querySelector('div[style*="aspect-ratio"]');
-        if (!c) return null;
-        const s = c.parentElement.getBoundingClientRect();
-        return { bot: Math.round(s.bottom), vh: window.innerHeight };
-      });
-      if (!g) note("fold-matrix", `${w}x${h}: no card rendered`);
-      else if (g.bot > g.vh) note("fold-matrix", `${w}x${h}: stage runs ${g.bot - g.vh}px past the fold`);
-      else ok(`${w}x${h}: whole stage above the fold (${g.bot}/${g.vh})`);
-      await q.close();
-    }
+    // ⛑ SWIPE FEEL and the VIEWPORT FOLD MATRIX left with the deck (2026-08-06).
+    // "Feel" sampled the outgoing card's transform every frame to prove it never
+    // animates BACK to centre before the next card arrives (Andrew's "moves away,
+    // then comes back, then lags"). The matrix re-ran the above-the-fold check at
+    // 1366x768 / 1280x720 / 1024x768 / 414x896, because the original check ran at
+    // 1440x900 only — never at a width where it overflowed.
+    // ⛔ BOTH ARE OWED TO WATCHPILE, NOT DISCHARGED. They are the two most
+    // valuable swipe assertions in this file: one caught a defect no static check
+    // could see, the other caught the class "we only ever measured one viewport".
+    // Recorded in Watchpile's notes.
   }
 
   // All three of these were found by Andrew USING the live site, not by this
@@ -725,7 +647,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // query returned one row per (title x kind x provider) with no collapse and
     // no limit — 220,963 rows against a 5,000-row runtime cap — and it rendered
     // 167 posters carrying THREE marks. Nothing errored.
-    const gp = await b.newPage({ viewport: { width: 1440, height: 1200 } });
+    const gp = await cleanPage(b, { width: 1440, height: 1200 });
     await gp.goto(BASE + "/genre_pairs.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await gp.waitForTimeout(20000);
     await gp.evaluate(async () => {
@@ -766,7 +688,7 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // but it never renders here — the shelves show seven per subgenre — and a
     // canary that is not on the page is a check that cannot fail for the right
     // reason.)
-    const wn = await b.newPage({ viewport: { width: 1440, height: 1200 } });
+    const wn = await cleanPage(b, { width: 1440, height: 1200 });
     await wn.goto(BASE + "/genre_pairs.html?$GENRE=Western", { waitUntil: "domcontentloaded", timeout: 120000 });
     await wn.waitForTimeout(20000);
     await wn.evaluate(async () => {
@@ -808,40 +730,80 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // fresh rows lack the mutation, and the skipped card returned ~2 swipes
     // later. Pure skipping never reproduced it — only skip INTERLEAVED with
     // rating does, which is what a real visitor does.
+    // ⛔ NOT `cleanPage`: this block ends by asserting that ratings SURVIVE a
+    // reload, and an init-script clear would wipe them on that very reload and
+    // report a persistence failure that is really the harness. It clears ONCE,
+    // by hand, so the block still starts from an empty profile.
     const sk = await b.newPage({ viewport: { width: 1440, height: 900 } });
     await sk.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await sk.evaluate((k) => { try { localStorage.removeItem(k); } catch (e) {} }, PROFILE_KEY);
+    await sk.reload({ waitUntil: "domcontentloaded", timeout: 120000 });
     await sk.waitForTimeout(18000);
-    await sk.getByRole("button", { name: "Swipe" }).click(); await sk.waitForTimeout(2000);
-    await sk.getByRole("button", { name: "Films" }).click(); await sk.waitForTimeout(4000);
-    const nameOf = () => sk.evaluate(() => {
-      const c = document.querySelector('div[style*="aspect-ratio"]');
-      return c ? c.parentElement.children[1].textContent : "";
-    });
-    const seq = [], skippedNames = new Set();
-    for (let i = 0; i < 10; i++) {
-      const n = await nameOf();
-      seq.push(n);
-      if (i % 2 === 0) { skippedNames.add(n); await sk.keyboard.press("ArrowDown"); }
-      else { await sk.keyboard.press("ArrowRight"); }
-      await sk.waitForTimeout(2100);
-    }
-    const returned = [...skippedNames].filter((s) => seq.filter((x) => x === s).length > 1);
-    if (returned.length) note("skip-persist", `a skipped card came back after a rating: ${returned.join(", ")}`);
-    else ok(`"not seen" survives interleaved ratings (${new Set(seq).size}/${seq.length} distinct)`);
+    // ⛑ RETARGETED TO THE GRID (2026-08-06), and it is a SHARPER test of the same
+    // defect. The bug was that "not seen" lived as a mutation on the seed query's
+    // row, so rating anything re-ran the queries and the fresh rows arrived
+    // without it. The deck version detected that indirectly (a skipped card came
+    // back around). In the grid the mark is on the tile itself, so the assertion
+    // can be direct: mark it unseen, rate something ELSE, and require the mark to
+    // still be there after the re-query. Interleaving is still the point — pure
+    // skipping never reproduced it.
+    await sk.getByRole("button", { name: "Grid" }).click(); await sk.waitForTimeout(3000);
 
-    // Andrew: down arrow or space should mark unseen, like left/right rate.
-    const before = await sk.evaluate(() => document.body.innerText);
-    await sk.keyboard.press("Space");
-    await sk.waitForTimeout(2200);
-    const after = await sk.evaluate(() => document.body.innerText);
-    const likes = (s) => (s.match(/(\d+) liked/) || [0, "0"])[1];
-    if (likes(before) !== likes(after)) note("skip-keys", "Space recorded a rating instead of skipping");
-    else ok("Space marks unseen without recording a verdict");
+    const unseenMarks = sk.locator('button[data-rate="title"][aria-label^="Not seen: "]');
+    if (!(await unseenMarks.count())) {
+      note("skip-persist", 'the grid offers no "not seen" mark — the third outcome is unreachable');
+    } else {
+      const target = await unseenMarks.first().getAttribute("aria-label");
+      await unseenMarks.first().click();
+      await sk.waitForTimeout(1500);
+
+      // Rate FIVE other titles, so the givens are written and the query set
+      // genuinely re-runs between the mark and the check.
+      const likes = sk.locator('button[data-rate="title"][aria-label^="Yes: "]');
+      const n = Math.min(5, await likes.count());
+      for (let i = 1; i <= n; i++) { await likes.nth(i).click(); await sk.waitForTimeout(700); }
+      await sk.waitForTimeout(6000);
+
+      const stillSet = await sk.evaluate((label) => {
+        const b = [...document.querySelectorAll("button")].find((x) => x.getAttribute("aria-label") === label);
+        return b ? b.getAttribute("aria-pressed") === "true" : null;
+      }, target);
+      if (stillSet === null) note("skip-persist", `the tile marked "${target}" vanished from the grid after rating`);
+      else if (!stillSet) note("skip-persist", `"${target}" lost its "not seen" mark once other titles were rated`);
+      else ok('"not seen" survives interleaved ratings (grid, verified on the tile itself)');
+
+      // Andrew: the third outcome must be reachable and must NOT record a verdict.
+      const before = await sk.evaluate(() => document.body.innerText);
+      const another = unseenMarks.nth(1);
+      if (await another.count()) {
+        await another.click();
+        await sk.waitForTimeout(2500);
+        const after = await sk.evaluate(() => document.body.innerText);
+        const likeCount = (t) => (t.match(/(\d+) liked/) || [0, "0"])[1];
+        if (likeCount(before) !== likeCount(after)) note("skip-keys", '"not seen" recorded a rating instead of skipping');
+        else ok('"not seen" marks unseen without recording a verdict');
+      }
+    }
+
+    // ⛑ NEW 2026-08-06: RATINGS MUST SURVIVE A RELOAD. Until now they lived in
+    // React state plus the URL givens and nothing else, so a refresh emptied the
+    // profile — and the page split planned in NEXT-LAYOUT-WORK.md §3 was
+    // justified on the premise that "the two halves already share state through
+    // the URL and localStorage", which was only ever true of the SERVICE picker.
+    // This asserts the persistence that premise assumed.
+    const ratedBefore = await sk.evaluate(() => (document.body.innerText.match(/(\d+) liked/) || [0, "0"])[1]);
+    await sk.reload({ waitUntil: "domcontentloaded", timeout: 120000 });
+    await sk.waitForTimeout(18000);
+    const ratedAfter = await sk.evaluate(() => (document.body.innerText.match(/(\d+) liked/) || [0, "0"])[1]);
+    if (Number(ratedBefore) === 0) note("profile-persist", "nothing was rated, so the reload check proved nothing");
+    else if (ratedAfter !== ratedBefore) note("profile-persist", `ratings did not survive a reload (${ratedBefore} liked -> ${ratedAfter})`);
+    else ok(`ratings survive a reload (${ratedAfter} liked)`);
+
     await sk.close();
   }
 
   console.log("\n[7] internal links resolve");
-  const p = await b.newPage({ viewport: { width: 1440, height: 1000 } });
+  const p = await cleanPage(b, { width: 1440, height: 1000 });
   await p.goto(BASE + "/index.html", { waitUntil: "networkidle", timeout: 90000 });
   const hrefs = await p.evaluate(() =>
     Array.from(document.querySelectorAll("a[href]")).map((a) => a.getAttribute("href"))

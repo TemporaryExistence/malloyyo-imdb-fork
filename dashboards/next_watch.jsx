@@ -18,6 +18,7 @@ import { filters, useGiven, useQuery } from "@malloyyo/dashboard";
 import { parseProviders, visibleServices, serviceLink, canonicalService, loadMyServices, saveMyServices } from "./lib/streaming.js";
 import { LOGO, ChipBase, StreamableMark, ServicePicker } from "./lib/streamui.jsx";
 import { SearchBox } from "./lib/searchui.jsx";
+import { loadProfile, saveProfile, profileIsEmpty } from "./lib/profile.js";
 
 /* ============================ shared viz kit ============================ */
 /* copied from genre_pairs.jsx on purpose: jsx components are sandboxed, so
@@ -317,16 +318,39 @@ function Availability({ ink, offers, myServices, title, year }) {
 }
 
 /* ------------------------------ poster tile ----------------------------- */
-function Tile({ ink, row, verdict, onRate, offers, onOpen, reason }) {
+function Tile({ ink, row, verdict, onRate, offers, onOpen, reason, onSkip, skipped }) {
   const [bad, setBad] = React.useState(false);
   const frame = {
     width: TILE_W, height: 156, borderRadius: 6, display: "block",
     border: verdict === "up" ? `2px solid ${GOOD}` : verdict === "down" ? `2px solid ${BAD}` : `1px solid ${ink.track}`,
-    background: ink.track, opacity: verdict === "down" ? 0.45 : 1,
+    background: ink.track, opacity: verdict === "down" || skipped ? 0.45 : 1,
     transition: "opacity .12s ease, border-color .12s ease",
   };
+  // ⛑ ALL THREE OUTCOMES LIVE ON THE TILE NOW (2026-08-06). The tile used to
+  // offer exactly one — click toggles "liked" — because "not for me" and "not
+  // seen" were reachable ONLY through the swipe deck. The deck is leaving the
+  // fork (CHARTER §7.2), so removing it without this would have silently deleted
+  // two thirds of the rating vocabulary from the whole page while every test
+  // still passed. Drawn as a small row under the poster rather than as overlay
+  // halves: the halves were a swipe affordance, and a grid is not swiped.
+  // `data-rate` exists for the harness: person marks and title marks share the
+  // "Not for me: …" label shape, so a selector on the label alone is ambiguous and
+  // silently picks whichever happens to be first in the DOM.
+  const Mark = ({ on, label, title, color, ch, onPick }) => (
+    <button type="button" data-rate="title" onClick={onPick} aria-label={label} aria-pressed={on} title={title}
+      style={{ font: "inherit", fontSize: 11, lineHeight: 1, cursor: "pointer", flex: 1,
+               padding: "4px 0", borderRadius: 5,
+               background: on ? color : "transparent", color: on ? "#fff" : ink.muted,
+               border: `1px solid ${on ? color : ink.track}` }}>{ch}</button>
+  );
   return (
-    <div style={{ width: TILE_W }}>
+    // ⛑ FLEX COLUMN + `marginTop:auto` ON THE MARKS ROW (2026-08-06). CSS grid
+    // stretches every cell in a row to the tallest, so with a plain block the
+    // three marks sat at a different height under every tile whose title wrapped
+    // to two or three lines — ragged, and a direct consequence of adding them.
+    // Pushing the row to the bottom of the cell aligns them without truncating
+    // anyone's title, which would be deciding content to fix layout.
+    <div style={{ width: TILE_W, height: "100%", display: "flex", flexDirection: "column" }}>
       {/* the primary interaction must not be mouse-only: swipe mode had keyboard
           support from the start, the grid did not */}
       <div role="button" tabIndex={0}
@@ -357,6 +381,26 @@ function Tile({ ink, row, verdict, onRate, offers, onOpen, reason }) {
         {row.start_year ? Math.round(num(row.start_year)) : ""}
         {row.num_votes ? ` · ${compact(num(row.num_votes))}` : ""}
       </div>
+      {/* Only where rating is the job. The recommendation list passes no
+          `onRate`, and a verdict row there would invite rating the output. */}
+      {onRate && (
+        <div style={{ display: "flex", gap: 3, marginTop: "auto", paddingTop: 4 }}>
+          <Mark on={verdict === "down"} color={BAD} ch="✕"
+                label={`Not for me: ${row.primary_title}`}
+                title="Not for me"
+                onPick={() => onRate(verdict === "down" ? null : "down")} />
+          <Mark on={verdict === "up"} color={GOOD} ch="✓"
+                label={`Yes: ${row.primary_title}`}
+                title="Liked"
+                onPick={() => onRate(verdict === "up" ? null : "up")} />
+          {onSkip && (
+            <Mark on={!!skipped} color={ink.muted} ch="—"
+                  label={`Not seen: ${row.primary_title}`}
+                  title="Not seen"
+                  onPick={() => onSkip()} />
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -392,242 +436,9 @@ function Badge({ color, ch }) {
 // Keyboard already worked and still does; it is handled by the parent.
 // "The picture should be nearly full screen." 62vh capped at 560px was still
 // half the window on a laptop; the cap was doing the limiting, not the vh.
-// Raised again after the rater measured 74vh as 666px of a 900px window: a 2:3
-// portrait card can never fill a 16:9 desktop across, so HEIGHT is the only
-// dimension "nearly full screen" can mean here, and it should use all of it.
-// The ceiling is what still leaves room for the title and the skip button
-// beneath without pushing them under the fold (see the scroll-into-view note).
-// ⛔ THE RESERVE IS MEASURED, NOT GUESSED. A first pass at the fold problem
-// reserved 240px (desktop) and 250px (narrow) for the chrome under the card.
-// The real chrome is 117px and 201px. So the picture shrank to 73% / 66% of the
-// viewport — below where it started — with 84-144px sitting unused at every
-// size, against Andrew's verbatim "the picture should be nearly full screen".
-// Shrinking the thing he asked to be bigger, to solve a problem that needed
-// half as much room, is the kind of fix that is worse than the bug.
-// Desktop and mobile need different answers to "nearly full screen", and using
-// one number regressed mobile: at 82vh a 390x844 phone put the card's own TITLE,
-// the "Not seen" button and the disclaimer BELOW THE FOLD — a card sized to fill
-// the screen that pushes its own controls off it. On a phone the card is already
-// ~92% of the WIDTH, which is the near-full-bleed the complaint was about; the
-// height has to leave room for the rest of the stage. Both values are measured
-// against the rendered page, not chosen.
-const CARD_H_WIDE = "min(82vh, 820px, calc(100vh - 145px))";
-const CARD_H_NARROW = "min(78vh, 660px, calc(100vh - 220px))";
-
-// Inline styles cannot carry a media query, and flex-wrap alone put the ✕
-// ABOVE the card and the ✓ off the bottom of the screen at 390px. So the
-// breakpoint is read in JS and the stage lays out deliberately for each.
-function useNarrow(px = 720) {
-  const [narrow, setNarrow] = React.useState(false);
-  React.useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${px}px)`);
-    const read = () => setNarrow(mq.matches);
-    read();
-    mq.addEventListener("change", read);
-    return () => mq.removeEventListener("change", read);
-  }, [px]);
-  return narrow;
-}
-
-function SwipeStage({ ink, kind, image, title, subtitle, meta, mark, onLike, onDislike, onSkip, hint }) {
-  const [drag, setDrag] = React.useState(null);   // {x, y} live offset
-  const [fly, setFly] = React.useState(null);     // 'up' | 'down' | 'skip' while animating out
-  const [hover, setHover] = React.useState(null); // which half the pointer is over
-  const narrow = useNarrow();
-  const start = React.useRef(null);
-  const COMMIT = 88;
-
-  // ⛔ THE BOUNCE. Reported by Andrew: "the name immediately changes to the next
-  // actor but the image of the actor moves away, then comes back, then lags for
-  // a moment, THEN it changes."
-  //
-  // Cause: `finish` cleared `fly` in the SAME tick as it applied the verdict. So
-  // the OUTGOING card lost its flown-out transform and animated back to centre
-  // over 180ms, and only then did the parent swap in the next card — whose photo
-  // then had to be fetched from TMDB. Three visible stages for one swipe.
-  //
-  // Fix is ordering, not duration: `fly` is cleared ONLY when the card identity
-  // actually changes, and in a LAYOUT effect so the incoming card is painted at
-  // centre rather than painted flown-out and animated back.
-  React.useLayoutEffect(() => { setDrag(null); setFly(null); }, [title]);
-
-  // Safety net: if the card does NOT change (deck exhausted, or a verdict that
-  // does not remove the card), the layout effect never fires and the card would
-  // stay invisible. Never reached on the normal path.
-  React.useEffect(() => {
-    if (!fly) return;
-    const t = window.setTimeout(() => setFly(null), 700);
-    return () => window.clearTimeout(t);
-  }, [fly]);
-
-  const finish = (dir) => {
-    setFly(dir);
-    setDrag(null);
-    window.setTimeout(() => {
-      if (dir === "up") onLike();
-      else if (dir === "down") onDislike();
-      else onSkip();
-    }, 180);
-  };
-
-  const onDown = (e) => {
-    if (fly) return;
-    start.current = { x: e.clientX, y: e.clientY, moved: false };
-    setDrag({ x: 0, y: 0 });
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
-  };
-  const onMove = (e) => {
-    if (!start.current) return;
-    const dx = e.clientX - start.current.x, dy = e.clientY - start.current.y;
-    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) start.current.moved = true;
-    setDrag({ x: dx, y: dy });
-  };
-  const onUp = (e) => {
-    const s = start.current;
-    start.current = null;
-    if (!s) return;
-    const dx = e.clientX - s.x, dy = e.clientY - s.y;
-    // A press that never moved is a CLICK, and on desktop the half it landed in
-    // is the verdict. Same handler as the drag so the two cannot disagree.
-    if (!s.moved) {
-      const r = e.currentTarget.getBoundingClientRect();
-      finish(e.clientX - r.left < r.width / 2 ? "down" : "up");
-      return;
-    }
-    if (dy < -COMMIT && Math.abs(dy) > Math.abs(dx)) return finish("skip");
-    if (dx > COMMIT) return finish("up");
-    if (dx < -COMMIT) return finish("down");
-    setDrag(null); // under the threshold: spring back, no verdict
-  };
-
-  const dx = fly === "up" ? 520 : fly === "down" ? -520 : drag ? drag.x : 0;
-  const dy = fly === "skip" ? -520 : drag ? drag.y : 0;
-  const lean = Math.max(-1, Math.min(1, dx / 260));
-  // What the release WOULD do, shown while the finger is still down.
-  const verdict = fly || (drag
-    ? (drag.y < -COMMIT && Math.abs(drag.y) > Math.abs(drag.x) ? "skip"
-      : drag.x > COMMIT ? "up" : drag.x < -COMMIT ? "down" : null)
-    : null);
-
-  // The label hugs the OUTER edge of its half at mid height. Centred it landed
-  // squarely on the face of every actor card; at the foot of the card it fell
-  // below the fold on a laptop, which is the same bug as invisible. Outer edge
-  // + mid height is on the poster margin and on screen whenever the card is.
-  // It stays visible when idle -- the charter forbids an invisible hit target
-  // that judges films -- and only lights up when the pointer is in that half.
-  const HalfHint = ({ side, on }) => (
-    <div style={{
-      position: "absolute", top: 0, bottom: 0, [side]: 0, width: "50%",
-      display: "flex", alignItems: "center",
-      justifyContent: side === "left" ? "flex-start" : "flex-end",
-      padding: "0 10px",
-      background: on
-        ? `linear-gradient(to ${side === "left" ? "right" : "left"}, ${side === "left" ? "rgba(180,67,44,.32)" : "rgba(26,127,90,.32)"}, transparent)`
-        : "transparent",
-      transition: "background .12s ease", pointerEvents: "none", borderRadius: 10,
-    }}>
-      <span style={{
-        fontSize: 11.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase",
-        color: "#fff", background: on ? (side === "left" ? BAD : GOOD) : "rgba(0,0,0,.5)",
-        padding: "4px 9px", borderRadius: 6,
-        transition: "background .12s ease",
-      }}>{side === "left" ? "✕ No" : "Yes ✓"}</span>
-    </div>
-  );
-
-  const Side = ({ dir, label, color, ch }) => (
-    <button type="button" aria-label={label} onClick={() => finish(dir)}
-      style={{ font: "inherit", cursor: "pointer", border: `1px solid ${ink.track}`, background: ink.surface,
-               color, borderRadius: 12, width: 72, height: 72, fontSize: 28, fontWeight: 700, flex: "none",
-               boxShadow: "0 1px 3px rgba(0,0,0,.10)" }}>
-      {ch}
-    </button>
-  );
-
-  return (
-    <div style={{
-      display: "flex", gap: narrow ? 12 : 22, alignItems: "center", justifyContent: "center",
-      flexDirection: narrow ? "column" : "row",
-    }}>
-      {!narrow && <Side dir="down" label={`Not for me: ${title}`} color={BAD} ch="✕" />}
-
-      {/* data-stage marks the part that MUST be on screen: picture, name, skip,
-          disclaimer. The scroll used to target the whole swipe section, chip row
-          included, which is taller than a laptop viewport — so it decided the
-          stage "does not fit", aligned the top, and pushed the foot off. The
-          chips are not the thing that has to be visible. */}
-      <div data-stage style={{ textAlign: "center", maxWidth: "min(92vw, 560px)" }}>
-        <div
-          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
-          onPointerCancel={() => { start.current = null; setDrag(null); }}
-          onPointerLeave={() => setHover(null)}
-          onPointerMoveCapture={(e) => {
-            if (start.current) return setHover(null);
-            const r = e.currentTarget.getBoundingClientRect();
-            setHover(e.clientX - r.left < r.width / 2 ? "left" : "right");
-          }}
-          style={{
-            position: "relative", height: narrow ? CARD_H_NARROW : CARD_H_WIDE, aspectRatio: "2 / 3", maxWidth: "min(92vw, 560px)",
-            margin: "0 auto", borderRadius: 10, overflow: "hidden", background: ink.track,
-            border: `1px solid ${ink.track}`, cursor: "grab", touchAction: "none", userSelect: "none",
-            transform: `translate(${dx}px, ${dy}px) rotate(${lean * 7}deg)`,
-            opacity: fly ? 0 : 1,
-            transition: drag ? "none" : "transform .18s ease, opacity .18s ease",
-            boxShadow: "0 1px 3px rgba(0,0,0,.14)",
-          }}>
-          {image
-            ? <img src={image} alt={title} draggable={false}
-                   style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-            : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center",
-                            justifyContent: "center", color: ink.muted, fontSize: 15, padding: 20,
-                            textAlign: "center" }}>{title}</div>}
-
-          {/* the affordance: both halves are labelled BEFORE the first click */}
-          <HalfHint side="left" on={hover === "left" || verdict === "down"} />
-          <HalfHint side="right" on={hover === "right" || verdict === "up"} />
-
-          {kind && (
-            <span style={{ position: "absolute", left: 8, top: 8, fontSize: 10.5, fontWeight: 700,
-                           letterSpacing: ".08em", textTransform: "uppercase", color: "#fff",
-                           background: "rgba(0,0,0,.55)", padding: "3px 7px", borderRadius: 5 }}>{kind}</span>
-          )}
-          {mark}
-          {verdict === "skip" && (
-            <span style={{ position: "absolute", left: "50%", top: 14, transform: "translateX(-50%)",
-                           fontSize: 12, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase",
-                           color: "#fff", background: "rgba(0,0,0,.65)", padding: "4px 9px", borderRadius: 6 }}>
-              Not seen
-            </span>
-          )}
-        </div>
-
-        <div style={{ fontSize: 17, fontWeight: 660, color: ink.text, marginTop: 10, lineHeight: 1.25 }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 12.5, color: ink.muted, marginTop: 2 }}>{subtitle}</div>}
-        {meta}
-        <button type="button" onClick={() => finish("skip")}
-          style={{ marginTop: 10, font: "inherit", fontSize: 12, cursor: "pointer", padding: "5px 10px",
-                   borderRadius: 7, background: ink.surface, color: ink.text2, border: `1px solid ${ink.track}` }}>
-          Not seen
-        </button>
-        {hint && <div style={{ fontSize: 11.5, color: ink.muted, marginTop: 8 }}>{hint}</div>}
-      </div>
-
-      {narrow
-        ? (
-          <div style={{ display: "flex", gap: 22, justifyContent: "center" }}>
-            <Side dir="down" label={`Not for me: ${title}`} color={BAD} ch="✕" />
-            <Side dir="up" label={`Yes: ${title}`} color={GOOD} ch="✓" />
-          </div>
-        )
-        : <Side dir="up" label={`Yes: ${title}`} color={GOOD} ch="✓" />}
-    </div>
-  );
-}
-
 /* -------------------------------- dashboard ---------------------------- */
 export default function Dashboard({ dashboard, givens }) {
   const { ink } = useTheme();
-  const narrow = useNarrow();
   const gLiked = useGiven("LIKED");
   const gDisliked = useGiven("DISLIKED");
   const gTitle = useGiven("TITLE");
@@ -637,11 +448,44 @@ export default function Dashboard({ dashboard, givens }) {
   const gDislikedPeople = useGiven("DISLIKED_PEOPLE");
   const gDetail = useGiven("DETAIL_ID");
 
+  // ⛑ ONE SEED, COMPUTED BEFORE ANY STATE (2026-08-06). Titles, people and
+  // "not seen" are three separate pieces of state declared in three places; the
+  // old seeding ran between them and could therefore only reach `verdicts`. So a
+  // shared link restored your titles and silently dropped your PEOPLE — and
+  // nothing persisted at all across a reload. Computing the whole seed up front
+  // is what lets all three initialise from the same decision.
+  //
+  // ⛔ PRECEDENCE IS DELIBERATE: the URL WINS over the saved profile. A URL that
+  // carries ratings is someone opening a list that was SHARED with them, and
+  // showing them their own saved profile instead would be the same bug the URL
+  // seeding exists to prevent, arriving from the other side. localStorage is the
+  // fallback — the same person returning, or moving between this site's pages.
+  const seed = React.useRef(null);
+  if (!seed.current) {
+    const fromGiven = (g) => {
+      try { const v = filters.values(g.value); return Array.isArray(v) ? v.map(String) : []; }
+      catch (e) { return []; }
+    };
+    const titles = {}, people = {};
+    for (const t of fromGiven(gLiked)) if (t && t !== "__none__") titles[t] = "up";
+    for (const t of fromGiven(gDisliked)) if (t && t !== "__none__") titles[t] = "down";
+    for (const n of fromGiven(gLikedPeople)) if (n && n !== "__none__") people[n] = "up";
+    for (const n of fromGiven(gDislikedPeople)) if (n && n !== "__none__") people[n] = "down";
+
+    if (Object.keys(titles).length || Object.keys(people).length) {
+      seed.current = { verdicts: titles, people, skipped: [], from: "url" };
+    } else {
+      const saved = loadProfile();
+      seed.current = profileIsEmpty(saved)
+        ? { verdicts: {}, people: {}, skipped: [], from: "empty" }
+        : { ...saved, from: "storage" };
+    }
+  }
+
   // verdicts: tconst -> 'up' | 'down'. The single source of truth for the UI;
   // the givens are derived from it so the engine and the screen cannot disagree.
-  let [verdicts, setVerdicts] = React.useState({});
+  const [verdicts, setVerdicts] = React.useState(() => seed.current.verdicts);
   const [mode, setMode] = React.useState("grid");
-  const [deck, setDeck] = React.useState(0);
   // ⛔ "NOT SEEN" IS STATE, NOT A MUTATION ON A QUERY ROW. It used to be
   // remembered as `row._shown++` on the object the seed query returned. Rating
   // anything writes a given, the runtime re-runs its query set, and the fresh
@@ -649,27 +493,10 @@ export default function Dashboard({ dashboard, givens }) {
   // the visitor rated something, and the skipped card came back about two
   // swipes later. Reproduced exactly: skip, like, skip → Shawshank returns.
   // A React set survives any number of query re-runs.
-  const [skipped, setSkipped] = React.useState(() => new Set());
+  const [skipped, setSkipped] = React.useState(() => new Set(seed.current.skipped));
   const [open, setOpen] = React.useState(null);
   const [history, setHistory] = React.useState([]);
   const [q, setQ] = React.useState("");
-
-  // Seed from the URL once, BEFORE the effects below start writing. Without
-  // this a shared link opened to an empty page: the givens carried the ratings
-  // but the UI state did not, and the first effect overwrote them with the
-  // sentinel. A list you cannot reopen is a list you cannot share.
-  const seeded = React.useRef(false);
-  if (!seeded.current) {
-    seeded.current = true;
-    const fromGiven = (g) => {
-      try { const v = filters.values(g.value); return Array.isArray(v) ? v.map(String) : []; }
-      catch (e) { return []; }
-    };
-    const init = {};
-    for (const t of fromGiven(gLiked)) if (t && t !== "__none__") init[t] = "up";
-    for (const t of fromGiven(gDisliked)) if (t && t !== "__none__") init[t] = "down";
-    if (Object.keys(init).length) verdicts = init;
-  }
 
   const liked = React.useMemo(() => Object.keys(verdicts).filter((k) => verdicts[k] === "up"), [verdicts]);
   const disliked = React.useMemo(() => Object.keys(verdicts).filter((k) => verdicts[k] === "down"), [verdicts]);
@@ -728,7 +555,6 @@ export default function Dashboard({ dashboard, givens }) {
   const periodsQ = useQuery({ query: "nw_periods", givens });
   const gGenre = useGiven("GENRE");
   const gYear = useGiven("RELEASE_YEAR");
-  const [swipeKind, setSwipeKind] = React.useState("people");
   const personTitles = useQuery({ query: "titles_by_person", givens });
   const [person, setPerson] = React.useState("");
 
@@ -751,7 +577,7 @@ export default function Dashboard({ dashboard, givens }) {
   }, [gYear.value]);
   // Kept apart from title verdicts on purpose. A liked PERSON raises their
   // weight in the profile; it never marks their filmography as liked.
-  const [peopleVerdicts, setPeopleVerdicts] = React.useState({});
+  const [peopleVerdicts, setPeopleVerdicts] = React.useState(() => seed.current.people);
   const likedPeople = React.useMemo(
     () => Object.keys(peopleVerdicts).filter((k) => peopleVerdicts[k] === "up"), [peopleVerdicts]);
   // ⛔ A LEFT SWIPE ON A PERSON USED TO GO NOWHERE. Only the liked set was ever
@@ -763,6 +589,18 @@ export default function Dashboard({ dashboard, givens }) {
     () => Object.keys(peopleVerdicts).filter((k) => peopleVerdicts[k] === "down"), [peopleVerdicts]);
   useDebouncedGiven(gLikedPeople, likedPeople);
   useDebouncedGiven(gDislikedPeople, dislikedPeople);
+
+  // ⛑ PERSIST. One effect for all three slices, so they can never save out of
+  // step with each other. Debounced for the same reason the givens are: a burst
+  // of ratings should cost one write, not one per click. `skipped` is a Set, so
+  // it is compared by its serialised contents rather than by identity — a Set
+  // never compares equal to itself across renders and this would otherwise fire
+  // on every single render.
+  const skippedKey = [...skipped].sort().join(",");
+  React.useEffect(() => {
+    const t = window.setTimeout(() => saveProfile(verdicts, peopleVerdicts, skipped), 400);
+    return () => window.clearTimeout(t);
+  }, [verdicts, peopleVerdicts, skippedKey]);
 
   // availability indexed by title, so a tile lookup is O(1) not a scan
   // one row per title now: logos are a pipe-joined string
@@ -831,14 +669,25 @@ export default function Dashboard({ dashboard, givens }) {
   };
   // Undoable like any other verdict — a mis-tapped "not seen" removes a card
   // from the session, which is exactly the kind of slip Undo exists for.
+  // Toggles, so the tile's "not seen" mark can be un-set the same way the other
+  // two can. History records which way it went, so Undo restores either.
   const skip = (tconst) => {
-    setHistory((h) => [...h, { kind: "skip", id: tconst }]);
-    setSkipped((s) => { const n = new Set(s); n.add(tconst); return n; });
-    setDeck((d) => d + 1);
+    setSkipped((s) => {
+      const was = s.has(tconst);
+      setHistory((h) => [...h, { kind: "skip", id: tconst, was }]);
+      const n = new Set(s);
+      if (was) n.delete(tconst); else n.add(tconst);
+      return n;
+    });
   };
+  // `v == null` UN-RATES (removes the key) rather than storing a third state —
+  // the same contract `rate` already has for titles, and what the search-side
+  // toggle needs when you click the mark that is already lit. The deck's own
+  // "not seen" still passes the literal "skip", which is a real verdict there
+  // (it is what takes the card out of the deck), so both callers stay honest.
   const ratePerson = (nconst, v) => {
     setHistory((h) => [...h, { kind: "person", id: nconst, prev: peopleVerdicts[nconst] ?? null }]);
-    setPeopleVerdicts((s) => ({ ...s, [nconst]: v }));
+    setPeopleVerdicts((s) => { const n = { ...s }; if (v == null) delete n[nconst]; else n[nconst] = v; return n; });
   };
 
   const undo = () => {
@@ -851,10 +700,11 @@ export default function Dashboard({ dashboard, givens }) {
         return n;
       };
       if (last.kind === "skip") {
-        setSkipped((s) => { const n = new Set(s); n.delete(last.id); return n; });
-        setDeck((d) => Math.max(0, d - 1));
+        // `was` records the state BEFORE the toggle, so undo restores it in
+        // either direction rather than always un-skipping.
+        setSkipped((s) => { const n = new Set(s); if (last.was) n.add(last.id); else n.delete(last.id); return n; });
       } else if (last.kind === "person") setPeopleVerdicts(restore);
-      else { setVerdicts(restore); setDeck((d) => Math.max(0, d - 1)); }
+      else setVerdicts(restore);
       return h.slice(0, -1);
     });
   };
@@ -1022,91 +872,6 @@ export default function Dashboard({ dashboard, givens }) {
 
   // A card sized to fill the screen does not fill the screen if it opens BELOW
   // it: the genre chips and the timeline are ~490px of chrome, so at a laptop
-  // height the title, the skip button and the No/Yes affordance were all under
-  // the fold. Centre the stage when swipe mode opens. Once only -- re-centring
-  // on every card would yank the page around mid-swipe.
-  // ⛔ THIS USED TO RACE THE RELAYOUT. It measured in the same frame the mode
-  // changed, so on a phone it centred on geometry that was still the OLD
-  // layout's and landed ~134px short, hiding "Not seen" and the disclaimer. It
-  // presented as an emulation-only bug; it was a race, and re-running it landed
-  // correctly every time. Measure after two frames, then check once more after
-  // the swipe-mode content has settled.
-  const stageRef = React.useRef(null);
-  const recenterRef = React.useRef(null);
-  React.useEffect(() => {
-    if (mode !== "swipe") return;
-    // `block:"center"` left the foot flush with the fold, so the disclaimer sat
-    // 1px off-screen at three common desktop sizes — and re-tuning the height
-    // reserve only moved which three. A `window.scrollBy` delta was worse
-    // still: this page scrolls inside a CONTAINER, not the window, so scrollBy
-    // moved nothing. scrollIntoView finds the real scroller, and scroll-margin
-    // is the part that makes the margin a guarantee instead of arithmetic.
-    const PAD = 16;
-    const center = () => {
-      const root = stageRef.current;
-      if (!root) return;
-      const el = root.querySelector("[data-stage]") || root;
-      const r = el.getBoundingClientRect();
-      const vh = window.innerHeight;
-      if (r.top >= PAD && r.bottom <= vh - PAD) return;
-      const tallerThanScreen = r.height + PAD * 2 > vh;
-      el.style.scrollMarginTop = PAD + "px";
-      el.style.scrollMarginBottom = PAD + "px";
-      // INSTANT, not smooth. A smooth correction is still animating when a
-      // visitor starts scrolling, so the two fight and the page snaps back —
-      // the "userScrolled" guard below cannot stop a scroll already in flight.
-      // An instant correction is over within the frame and has nothing to fight.
-      el.scrollIntoView({ block: tallerThanScreen ? "start" : "end", behavior: "auto" });
-    };
-    // ⛔ NEVER FIGHT A DELIBERATE SCROLL. The pending re-check used to fire
-    // ~400ms after entering swipe mode regardless, so a visitor who scrolled in
-    // that window got yanked back. Any user scroll disarms every pending
-    // correction; the auto-scroll gets one chance and then defers.
-    // ⛔ CORRECT ONLY WHAT THE APP BROKE. Two earlier guards were the wrong
-    // instrument. Watching scroll POSITION could not tell an app-caused layout
-    // shift from a deliberate scroll — both move scrollY — so it disarmed
-    // itself on the very shifts it existed to fix. Watching the column's
-    // VISIBILITY was worse: scrolling away is exactly the column leaving view,
-    // so it re-centred and fought the visitor.
-    // The causal signal is the DOCUMENT HEIGHT: a re-query that relaid the page
-    // changes it, and scrolling never does. Correct on that, never on scrolling.
-    let userScrolled = false;
-    const onUserInput = () => { userScrolled = true; };
-    const guarded = () => { if (!userScrolled) center(); };
-    window.addEventListener("wheel", onUserInput, { passive: true });
-    window.addEventListener("touchmove", onUserInput, { passive: true });
-
-    let a, c;
-    a = requestAnimationFrame(() => { c = requestAnimationFrame(guarded); });
-    const t = window.setTimeout(guarded, 400);
-
-    // The guarantee used to be ONE-SHOT, keyed to [mode, swipeKind]. Re-clicking
-    // the already-active chip changes neither, so the effect never re-ran — but
-    // the click still re-queried and relaid out, nudging the page 23px and
-    // clipping the disclaimer again at 1366x768. Watch the column's geometry
-    // instead of guessing which interactions move it.
-    // A ResizeObserver was the wrong instrument: re-clicking the chip re-runs a
-    // query and shifts the column's POSITION without changing its SIZE, so the
-    // observer never fired and the disclaimer clipped again. Watch visibility
-    // instead — it catches a drift out of view whatever caused it.
-    // ⛔ THE NUDGE WAS FOCUS, NOT LAYOUT — which is why three observers in a row
-    // failed to catch it. Clicking a mode chip FOCUSES it, and the browser
-    // scrolls a focused control into view; the chips sit above the card, so the
-    // page rose 23px and pushed the disclaimer off. No ResizeObserver,
-    // IntersectionObserver or scroll-position watcher can see that, because
-    // nothing resized, nothing left view on its own, and the scroll was real.
-    // The chip handlers re-assert directly instead — see `recenterRef`.
-    recenterRef.current = guarded;
-    const io = null;
-    return () => {
-      cancelAnimationFrame(a); cancelAnimationFrame(c); window.clearTimeout(t);
-      window.removeEventListener("wheel", onUserInput);
-      window.removeEventListener("touchmove", onUserInput);
-      if (io) io.disconnect();
-      recenterRef.current = null;
-    };
-  }, [mode, swipeKind]);
-
   const [copied, setCopied] = React.useState(null);
   const copy = (what, text) => {
     const ok = () => { setCopied(what); window.setTimeout(() => setCopied(null), 1600); };
@@ -1129,60 +894,6 @@ export default function Dashboard({ dashboard, givens }) {
     const on = (offersFor[r.tconst]?.services || []).map((x) => x.service).join(", ");
     return `${r.primary_title}${yr}${on ? ` · ${on}` : ""}`;
   }).join("\n"), [list, offersFor]);
-
-  // ADAPTIVE DECK. A fixed sequence stops informing after a handful of swipes:
-  // if someone has liked three action films, a fourth teaches almost nothing.
-  // Each next card is the most-voted unrated title whose genres we know LEAST
-  // about, so swipe 15 is worth more than swipe 5 instead of less. Cheap on
-  // purpose -- it reuses the genre already on the seed rows and needs no extra
-  // query, so the deck stays instant.
-  const genreSeen = React.useMemo(() => {
-    const c = {};
-    for (const r of pool) if (verdicts[r.tconst] && r.genre) c[r.genre] = (c[r.genre] || 0) + 1;
-    return c;
-  }, [pool, verdicts]);
-
-  // People cards come FIRST while we know nothing: one swipe on an actor
-  // touches every title they are in, where a film swipe touches one. Once a
-  // few are down, titles are the finer instrument (CHARTER F5).
-  const personCard = React.useMemo(() => {
-    const rows = (seedPeople.rows || []).filter((r) => r.nconst && !peopleVerdicts[r.nconst]);
-    return rows.length ? rows[0] : null;
-  }, [seedPeople.rows, peopleVerdicts]);
-
-  // People vs films vs shows is the visitor's choice, not ours: the deck used
-  // to force four person cards before showing a single title.
-  const usePersonCard = swipeKind === "people" && personCard;
-
-  // PRELOAD THE NEXT FACES AND POSTERS. The other half of "then lags for a
-  // moment": once the bounce was gone, the swap still waited on a cold TMDB
-  // fetch for the incoming photo. Warming the next few means the next card is
-  // already decoded when it is asked for. Cheap — these are the same CDN URLs
-  // the card is about to request, so it costs no extra bytes overall.
-  React.useEffect(() => {
-    if (mode !== "swipe") return;
-    const nextPeople = (seedPeople.rows || [])
-      .filter((r) => r.nconst && !peopleVerdicts[r.nconst]).slice(0, 4).map((r) => r.photo);
-    const nextTitles = pool.filter((r) => !verdicts[r.tconst] && !skipped.has(r.tconst)).slice(0, 4)
-      .map((r) => (r.poster ? r.poster.replace("/w154", "/w500") : null));
-    for (const src of [...nextPeople, ...nextTitles]) {
-      if (src) { const im = new window.Image(); im.src = src; }
-    }
-  }, [mode, swipeKind, seedPeople.rows, peopleVerdicts, pool, verdicts, skipped]);
-
-  const card = React.useMemo(() => {
-    // "Not seen" removes the card for the session. Telling us you have not seen
-    // something and being shown it again is the deck ignoring you.
-    const unrated = pool.filter((r) => !verdicts[r.tconst] && !skipped.has(r.tconst));
-    if (!unrated.length) return null;
-    let best = null, bestScore = -Infinity;
-    for (const r of unrated) {
-      const known = genreSeen[r.genre || "?"] || 0;
-      const score = -known * 3 + Math.log10(Math.max(10, num(r.num_votes)));
-      if (score > bestScore) { bestScore = score; best = r; }
-    }
-    return best;
-  }, [pool, verdicts, skipped, genreSeen, deck]);
 
   // --- ratings import (CHARTER §4.2) ---------------------------------------
   // The charter demoted this from headline to power-user path and the build
@@ -1263,45 +974,6 @@ export default function Dashboard({ dashboard, givens }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  // keyboard: swipe mode must not require a mouse or a touchscreen
-  React.useEffect(() => {
-    if (mode !== "swipe") return;
-    const onKey = (e) => {
-      // Guarding on `card` first meant the keyboard went dead on a PERSON card
-      // whenever the title pool happened to be empty -- the person deck was
-      // fully populated and the arrow keys did nothing.
-      // A modal is up; its own handler owns the keyboard. `open` MUST stay in
-      // this effect's dependency list — without it the listener closes over a
-      // stale `open`, the guard silently reads false, and arrow keys rate the
-      // card HIDDEN BEHIND the modal. It reproduced 6/6 on one path and 0/4 on
-      // a clean session, which is exactly how a stale closure presents.
-      if (open) return;
-      if (!card && !usePersonCard) return;
-      if (usePersonCard) {
-        if (e.key === "ArrowRight") ratePerson(personCard.nconst, "up");
-        else if (e.key === "ArrowLeft") ratePerson(personCard.nconst, "down");
-        else if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === " ") {
-          e.preventDefault();
-          ratePerson(personCard.nconst, "skip");
-        }
-        return;
-      }
-      if (e.key === "ArrowRight") { rate(card.tconst, "up"); setDeck((d) => d + 1); }
-      else if (e.key === "ArrowLeft") { rate(card.tconst, "down"); setDeck((d) => d + 1); }
-      // Andrew: "if you can use the left/right arrow for like/dislike, then down
-      // arrow or space bar should work to mark a movie/actor/show unseen."
-      // Up already matched the up-SWIPE; down and space now do too, so the
-      // third outcome is reachable by whichever key you reach for.
-      else if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === " ") {
-        e.preventDefault();   // space would otherwise page the document
-        skip(card.tconst);
-      }
-      else if ((e.key === "z" && (e.metaKey || e.ctrlKey)) || e.key === "Backspace") undo();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [mode, card, verdicts, usePersonCard, personCard, open]);
-
   const Chip = (props) => <ChipBase ink={ink} {...props} />;
 
   return (
@@ -1331,7 +1003,6 @@ export default function Dashboard({ dashboard, givens }) {
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
           <Chip on={mode === "grid"} onClick={() => setMode("grid")}>Grid</Chip>
-          <Chip on={mode === "swipe"} onClick={() => setMode("swipe")}>Swipe</Chip>
           <Chip on={mode === "search"} onClick={() => setMode("search")}>Search</Chip>
           <span style={{ marginLeft: 8, fontSize: 12, color: ink.muted, fontVariantNumeric: "tabular-nums" }}>
             {rated
@@ -1368,55 +1039,10 @@ export default function Dashboard({ dashboard, givens }) {
           <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, ${TILE_W}px)`, gap: 14 }}>
             {pool.slice(0, 48).map((r) => (
               <Tile key={r.tconst} ink={ink} row={r} verdict={verdicts[r.tconst]} offers={offersFor[r.tconst]}
+                    skipped={skipped.has(r.tconst)} onSkip={() => skip(r.tconst)}
                     onRate={(v) => rate(r.tconst, v)} />
             ))}
           </div>
-        </div>
-      )}
-
-      {mode === "swipe" && (
-        <div ref={stageRef} style={{ margin: "0 0 26px" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center", marginBottom: 12 }}>
-            {[["people", "People"], ["movie", "Films"]].map(([k, label]) => (
-              <Chip key={k} on={swipeKind === k}
-                onClick={() => {
-                  setSwipeKind(k);
-                  // Re-assert AFTER the browser's focus-scroll, including when
-                  // the chip was already active — that no-op click changes no
-                  // state, so nothing else would put the disclaimer back.
-                  requestAnimationFrame(() => {
-                    requestAnimationFrame(() => recenterRef.current && recenterRef.current());
-                  });
-                }}>{label}</Chip>
-            ))}
-            {/* A phone has no arrow keys and nothing to "click"; naming desktop
-                inputs on a touch device is instructions for someone else's
-                device. */}
-            <span style={{ fontSize: 12, color: ink.muted, marginLeft: 6 }}>
-              {narrow ? "Swipe, or tap a side." : "Drag, click a side, or use arrow keys (down = not seen)."}
-            </span>
-          </div>
-          {usePersonCard ? (
-            <SwipeStage
-              ink={ink} kind="Person" image={personCard.photo} title={personCard.person}
-              subtitle={`${Math.round(num(personCard.titles))} titles`}
-              hint="Weights the person, not their films."
-              onLike={() => ratePerson(personCard.nconst, "up")}
-              onDislike={() => ratePerson(personCard.nconst, "down")}
-              onSkip={() => ratePerson(personCard.nconst, "skip")} />
-          ) : card ? (
-            <SwipeStage
-              ink={ink}
-              kind="Film"
-              image={card.poster ? card.poster.replace("/w154", "/w500") : null}
-              title={card.primary_title}
-              subtitle={`${card.start_year ? Math.round(num(card.start_year)) : ""} · ★ ${num(card.average_rating).toFixed(1)}`}
-              mark={<StreamableMark ink={ink} offers={offersFor[card.tconst]}
-                                    title={card.primary_title} year={card.start_year} size={28} />}
-              onLike={() => { rate(card.tconst, "up"); setDeck((d) => d + 1); }}
-              onDislike={() => { rate(card.tconst, "down"); setDeck((d) => d + 1); }}
-              onSkip={() => skip(card.tconst)} />
-          ) : <div style={{ color: ink.muted, fontSize: 13 }}>Deck finished.</div>}
         </div>
       )}
 
@@ -1451,24 +1077,75 @@ export default function Dashboard({ dashboard, givens }) {
             <div style={{ marginTop: 12 }}>
               <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase",
                             color: ink.muted, fontWeight: 700, marginBottom: 7 }}>People</div>
+              {/* ⛑ RATING A PERSON LIVES HERE NOW (2026-08-06), and it had to be
+                  BUILT, not merely preserved. The layout plan said the person
+                  path "stays" through search when the deck leaves — but
+                  `ratePerson` had NO call site outside the deck, so deleting the
+                  deck first would have left `peopleVerdicts` permanently empty
+                  and silently killed `recommendations_by_person` and the
+                  disliked-person veto (CHARTER F4/F5) while every page still
+                  rendered. The name still SELECTS (surfacing their titles to
+                  rate, which is not the same as liking their filmography); the
+                  two marks beside it are the verdict, keyed on the nconst the
+                  model matches — see the note on `search_people`. */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                {(people.rows || []).slice(0, 12).map((r) => (
-                  <button key={r.person} type="button"
-                    onClick={() => { setPerson(r.person); gPerson.set(filters.oneOf(r.person)); }}
-                    style={{ font: "inherit", fontSize: 12.5, cursor: "pointer", padding: "5px 9px", borderRadius: 7,
-                             background: person === r.person ? ink.accent : ink.surface,
-                             color: person === r.person ? "#fff" : ink.text2,
-                             border: `1px solid ${person === r.person ? ink.accent : ink.track}` }}>
-                    {r.person}
-                    <span style={{ marginLeft: 5, fontSize: 10.5, opacity: 0.6 }}>{Math.round(num(r.titles))}</span>
-                  </button>
-                ))}
+                {(people.rows || []).slice(0, 12).map((r) => {
+                  const v = r.nconst ? peopleVerdicts[r.nconst] : undefined;
+                  return (
+                    <span key={r.nconst || r.person}
+                          style={{ display: "inline-flex", alignItems: "stretch", gap: 0 }}>
+                      <button type="button"
+                        onClick={() => { setPerson(r.person); gPerson.set(filters.oneOf(r.person)); }}
+                        style={{ font: "inherit", fontSize: 12.5, cursor: "pointer", padding: "5px 9px",
+                                 borderRadius: r.nconst ? "7px 0 0 7px" : 7,
+                                 background: person === r.person ? ink.accent : ink.surface,
+                                 color: person === r.person ? "#fff" : ink.text2,
+                                 border: `1px solid ${person === r.person ? ink.accent : ink.track}`,
+                                 borderRight: r.nconst ? "none" : undefined }}>
+                        {r.person}
+                        <span style={{ marginLeft: 5, fontSize: 10.5, opacity: 0.6 }}>{Math.round(num(r.titles))}</span>
+                      </button>
+                      {/* No nconst -> no verdict is possible, so no control is
+                          drawn. A button that silently does nothing is worse
+                          than an absent one. */}
+                      {r.nconst && (
+                        <>
+                          <button type="button"
+                            data-rate="person"
+                            aria-label={`Not for me: ${r.person}`}
+                            aria-pressed={v === "down"}
+                            title={v === "down" ? `Rated: not for you` : `Not for me`}
+                            onClick={() => ratePerson(r.nconst, v === "down" ? null : "down")}
+                            style={{ font: "inherit", fontSize: 12.5, cursor: "pointer", padding: "5px 8px",
+                                     background: v === "down" ? BAD : ink.surface,
+                                     color: v === "down" ? "#fff" : ink.muted,
+                                     border: `1px solid ${ink.track}`, borderRight: "none" }}>✕</button>
+                          <button type="button"
+                            data-rate="person"
+                            aria-label={`Yes: ${r.person}`}
+                            aria-pressed={v === "up"}
+                            title={v === "up" ? `Rated: liked` : `Like`}
+                            onClick={() => ratePerson(r.nconst, v === "up" ? null : "up")}
+                            style={{ font: "inherit", fontSize: 12.5, cursor: "pointer", padding: "5px 8px",
+                                     borderRadius: "0 7px 7px 0",
+                                     background: v === "up" ? GOOD : ink.surface,
+                                     color: v === "up" ? "#fff" : ink.muted,
+                                     border: `1px solid ${ink.track}` }}>✓</button>
+                        </>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11.5, color: ink.muted, marginTop: 7 }}>
+                A name weights the person, not their films. Pick the name itself to rate their titles.
               </div>
             </div>
           )}
           <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, ${TILE_W}px)`, gap: 14, marginTop: 14 }}>
             {(person ? (personTitles.rows || []) : (found.rows || [])).map((r) => (
               <Tile key={r.tconst} ink={ink} row={r} verdict={verdicts[r.tconst]} offers={offersFor[r.tconst]}
+                    skipped={skipped.has(r.tconst)} onSkip={() => skip(r.tconst)}
                     onRate={(v) => rate(r.tconst, v)} />
             ))}
           </div>
