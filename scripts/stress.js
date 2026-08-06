@@ -7,6 +7,29 @@
 //   node scripts/stress.js [baseUrl]
 const { chromium } = require("playwright-core");
 const BASE = process.argv[2] || "http://127.0.0.1:8810";
+
+// Titles whose genre set is EXACTLY the genre set of `title`, read out of the
+// built parquet with the duckdb CLI. Used instead of a hand-maintained list so
+// a corpus change cannot turn a correct ranking into a red test (it did once).
+function fullGenreMatches(title) {
+  const { execFileSync } = require("child_process");
+  const sql = `
+    with g as (select genres from 'docs/imdb_titles.parquet'
+               where primaryTitle = '${title.replace(/'/g, "''")}'
+               order by numVotes desc limit 1)
+    select t.primaryTitle from 'docs/imdb_titles.parquet' t, g
+    where list_sort(t.genres) = list_sort(g.genres);`;
+  try {
+    const out = execFileSync(process.env.DUCKDB_BIN || "duckdb", ["-noheader", "-list", "-c", sql],
+                             { encoding: "utf8" });
+    return new Set(out.split("\n").map((x) => x.trim()).filter(Boolean));
+  } catch (e) {
+    // A missing duckdb must not silently turn this into a check that passes
+    // whatever it is handed.
+    console.log("  WARN  fullGenreMatches could not run duckdb - thin-rank will fail closed");
+    return new Set();
+  }
+}
 const PAGES = ["index", "genre_pairs", "next_watch", "works_together"];
 // Only these render posters. `index` is a landing list and `works_together`
 // uses Malloy's table renderer, so demanding images of them was the harness
@@ -164,16 +187,59 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await p.waitForTimeout(17000);
 
-    const marks = await p.evaluate(() => ({
-      tiles: document.querySelectorAll('img[alt^="Poster for"]').length,
-      logos: [...document.querySelectorAll("img")].filter((i) => i.getAttribute("width") === "16").length,
-    }));
-    if (marks.tiles >= 20 && marks.logos < 20) note("provider-marks", `only ${marks.logos} logos over ${marks.tiles} posters`);
-    else ok(`provider marks (${marks.logos} logos / ${marks.tiles} posters)`);
+    // ⚑ THE CONTRACT CHANGED ON 2026-08-05 AND SO DID THIS CHECK. The mark used
+    // to be up to three provider logos sitting on the tile, so counting 16px
+    // <img> elements measured it. It is now ONE glyph whose logos live in a
+    // popover that is closed until hover -- so the old check counted zero and
+    // called a working feature broken. What is asserted now is the mark itself
+    // AND the licence term it must carry: TMDB requires JustWatch credited on
+    // each media item, and a mark rendering without that credit is the failure
+    // that actually matters.
+    const marks = await p.evaluate(() => {
+      const btns = [...document.querySelectorAll('button[aria-label^="Streaming on"]')];
+      return {
+        tiles: document.querySelectorAll('img[alt^="Poster for"]').length,
+        glyphs: btns.length,
+        credited: btns.filter((b) => /JustWatch/.test(b.getAttribute("aria-label") || "")).length,
+      };
+    });
+    if (marks.tiles >= 20 && marks.glyphs < 20)
+      note("provider-marks", `only ${marks.glyphs} streamable marks over ${marks.tiles} posters`);
+    else if (marks.glyphs !== marks.credited)
+      note("provider-marks", `${marks.glyphs - marks.credited} marks render with no JustWatch credit`);
+    else ok(`streamable marks (${marks.glyphs} over ${marks.tiles} posters, all credited)`);
+
+    // The mark must OPEN, and what it opens must be a real route rather than a
+    // dead popover -- the whole feature is the reveal, not the glyph.
+    const firstMark = p.locator('button[aria-label^="Streaming on"]').first();
+    if (await firstMark.count()) {
+      await firstMark.hover();
+      await p.waitForTimeout(600);
+      const pop = await p.evaluate(() => {
+        const menu = document.querySelector('[role="menu"]');
+        if (!menu) return null;
+        const links = [...menu.querySelectorAll("a")];
+        return { n: links.length, allHref: links.every((a) => a.href && /^https?:/.test(a.href)) };
+      });
+      if (!pop || !pop.n) note("provider-marks", "hovering the mark opens no service list");
+      else if (!pop.allHref) note("provider-marks", "a service in the popover has no link to follow");
+      else ok(`the mark opens ${pop.n} linked service(s)`);
+    }
 
     const tiles = await p.locator('img[alt^="Poster for"]').all();
     for (const t of tiles.slice(0, 5)) { await t.click(); await p.waitForTimeout(220); }
     await p.waitForTimeout(9000);
+    // ⚑ SCROLL FIRST. The recommendation grid is far below the fold and its
+    // posters are loading="lazy", so measuring naturalWidth without scrolling
+    // counts images the browser deliberately never fetched: 19 of 28 "missing"
+    // became 28 of 28 the moment the section was scrolled into view. The check
+    // is about poster COVERAGE, not about lazy-loading working.
+    await p.evaluate(async () => {
+      for (let y = 0; y < document.body.scrollHeight; y += 400) {
+        window.scrollTo(0, y); await new Promise((r) => setTimeout(r, 120));
+      }
+    });
+    await p.waitForTimeout(4000);
     const recImgs = await p.evaluate(() => {
       const h = [...document.querySelectorAll("div")].find((d) => d.innerText && d.innerText.startsWith("YOUR NEXT WATCH"));
       const sec = h ? h.parentElement : document;
@@ -322,6 +388,14 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // check used indexOf and silently passed when the title was absent.
     await sbox.fill("gladiator");
     await p.waitForTimeout(6000);
+    // ⚑ DISMISS THE SUGGESTIONS FIRST. The autocomplete dropdown added on
+    // 2026-08-05 is an overlay, so it sits on top of the first row of results --
+    // Playwright refused to click the Gladiator poster because
+    // "<span>Gladiator II</span> ... intercepts pointer events", and a real
+    // visitor would hit the same thing: the suggestion, not the poster. Escape
+    // closes it, which is the same key a person would reach for.
+    await p.keyboard.press("Escape");
+    await p.waitForTimeout(300);
     const g1 = p.locator('img[alt^="Poster for"]').first();
     if ((await g1.getAttribute("alt")) !== "Poster for Gladiator") {
       note("thin-rank", "could not seed the single-like case (Gladiator not first in search)");
@@ -334,9 +408,17 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
         const last = grids[grids.length - 1];
         return [...last.children].map((c) => c.children[1] && c.children[1].textContent).filter(Boolean);
       });
-      const FULL = ["Robin Hood", "King Arthur", "Kingdom of Heaven", "First Knight", "Exodus: Gods and Kings"];
+      // ⛔ DERIVED, NOT PASTED. This used to be a hardcoded list of five titles
+      // -- the full-genre matches as they happened to be when the check was
+      // written. Removing television from the corpus (CHARTER §7.2) surfaced
+      // The Dark Tower, which IS [Action, Adventure, Drama] exactly like
+      // Gladiator, and the check called a correct result a regression. A list
+      // of names asserts a moment; the property being tested is "shares every
+      // one of the liked title's genres", so that is what is computed, from
+      // the parquet, at run time.
+      const FULL = fullGenreMatches("Gladiator");
       const top4 = list.slice(0, 4);
-      const allFull = top4.length === 4 && top4.every((t) => FULL.indexOf(t) !== -1);
+      const allFull = top4.length === 4 && top4.every((t) => FULL.has(t));
       if (!allFull) note("thin-rank", `top 4 from one like are not all full-genre matches: ${top4.join(", ")}`);
       else ok(`one like ranks full genre matches first (${top4.join(", ")})`);
       const cIdx = list.indexOf("The Counselor");
@@ -372,12 +454,72 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     else ok("the imported file never left the browser (0 uploads)");
     await p2.close();
 
+    // 5b. FUZZY AUTOFILL ON LLOYD'S PEOPLE PAGE. He declared
+    // `suggest{query=name_options dimension=name}` on the NAME given, so he
+    // wanted suggestions; measured 2026-08-05 the datalist shipped with ONE
+    // option and nothing appeared. Ours attaches to the input he already
+    // renders (docs/assets/person-autofill.js) rather than replacing his table.
+    // ⛑ IT IS ATTACHED BY scripts/postbuild.sh, which the bundler will undo
+    // every time it regenerates docs/*.html. This check is what catches a build
+    // that forgot to run it -- the failure is otherwise silent and looks like
+    // "no matches".
+    const wt = await b.newPage({ viewport: { width: 1440, height: 1100 } });
+    await wt.goto(BASE + "/works_together.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await wt.waitForTimeout(20000);
+    const wtIn = wt.locator('input[list="dash-options-NAME"]');
+    if (!(await wtIn.count())) {
+      note("person-autofill", "the NAME input is gone - upstream changed the control");
+    } else {
+      await wtIn.click();
+      await wt.waitForTimeout(9000);
+      const st = await wt.evaluate(() => (window.__personAutofill && window.__personAutofill.state()) || null);
+      if (!st) note("person-autofill", "person-autofill.js is not on the page - did postbuild.sh run?");
+      else if (!st.loaded || st.people < 10000)
+        note("person-autofill", `the suggestion index did not load (${st.people} people)`);
+      else {
+        await wtIn.fill("");
+        await wtIn.type("mikel cain", { delay: 35 });
+        await wt.waitForTimeout(900);
+        const opts = await wt.evaluate(() =>
+          [...document.querySelectorAll('#person-autofill-list [role="option"]')].map((o) => o.textContent.trim()));
+        if (opts[0] !== "Michael Caine")
+          note("person-autofill", `"mikel cain" did not reach Michael Caine (got: ${opts.slice(0,3).join(", ") || "nothing"})`);
+        else {
+          // Filling the box is half the job; the page must actually re-query.
+          await wt.keyboard.press("Enter");
+          await wt.waitForTimeout(13000);
+          const applied = await wt.evaluate(() => ({
+            value: document.querySelector('input[list="dash-options-NAME"]').value,
+            collaborators: /Christopher Nolan|Hans Zimmer|Wally Pfister/.test(document.body.innerText),
+          }));
+          if (applied.value !== "Michael Caine")
+            note("person-autofill", `picking a suggestion did not set the input (${applied.value})`);
+          else if (!applied.collaborators)
+            note("person-autofill", "the input was set but the table never re-queried");
+          else ok("fuzzy person autofill: \"mikel cain\" -> Michael Caine, and the table re-queried");
+        }
+      }
+    }
+    await wt.close();
+
     // 6. TMDB requires the JustWatch credit on EACH media item. It lived only
     // in a `title=` tooltip, which a touch device cannot open.
-    const credit = await p.evaluate(() =>
-      [...document.querySelectorAll("img")].filter((i) => /JustWatch/.test(i.getAttribute("alt") || "")).length);
-    if (!credit) note("attribution", "per-item JustWatch credit is hover-only (unreachable on touch)");
-    else ok(`per-item JustWatch credit is in alt text (${credit} marks)`);
+    // Reachable WITHOUT hover, by any of the routes that actually reach a
+    // person: alt text on a visible image, an aria-label on a visible control,
+    // or clipped-but-rendered text. What is forbidden is the credit existing
+    // only inside something you have to hover to open.
+    const credit = await p.evaluate(() => {
+      const imgs = [...document.querySelectorAll("img")]
+        .filter((i) => /JustWatch/.test(i.getAttribute("alt") || "")).length;
+      const marks = [...document.querySelectorAll('button[aria-label*="JustWatch"]')]
+        .filter((b) => b.offsetParent !== null).length;
+      const inline = [...document.querySelectorAll('button[aria-label^="Streaming on"] span')]
+        .filter((sp) => /JustWatch/.test(sp.textContent || "")).length;
+      return { imgs, marks, inline };
+    });
+    if (!credit.imgs && !credit.marks) note("attribution", "per-item JustWatch credit is hover-only (unreachable on touch)");
+    else if (!credit.inline && !credit.imgs) note("attribution", "the credit is only an aria-label - no rendered text carries it");
+    else ok(`per-item JustWatch credit reachable without hover (${credit.marks} marks, ${credit.inline} with rendered text)`);
     await p.close();
   }
 
@@ -592,11 +734,11 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     await gp.waitForTimeout(3000);
     const gpm = await gp.evaluate(() => ({
       posters: document.querySelectorAll('img[alt^="Poster for"]').length,
-      logos: [...document.querySelectorAll("img")].filter((i) => /image\.tmdb\.org\/t\/p\/w45/.test(i.src)).length,
+      glyphs: document.querySelectorAll('button[aria-label^="Streaming on"]').length,
     }));
-    if (gpm.posters >= 50 && gpm.logos < gpm.posters * 0.4)
-      note("genre-pairs-marks", `only ${gpm.logos} provider marks over ${gpm.posters} posters on upstream's own page`);
-    else ok(`genre_pairs carries provider marks (${gpm.logos} over ${gpm.posters} posters)`);
+    if (gpm.posters >= 50 && gpm.glyphs < gpm.posters * 0.4)
+      note("genre-pairs-marks", `only ${gpm.glyphs} streamable marks over ${gpm.posters} posters on upstream's own page`);
+    else ok(`genre_pairs carries streamable marks (${gpm.glyphs} over ${gpm.posters} posters)`);
     await gp.close();
 
     // ⛔ THE ROW-CAP CANARY, and it is a named title rather than a percentage on
@@ -604,10 +746,22 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // films genuinely do not stream" — measured against the parquet, only 24 of
     // the 44 Film-Noir tiles have US streaming at all, so a 55% ratio there is
     // CORRECT and a threshold would have failed a working page.
-    // The canary is Zorro (tt0050079), rank 15,252 of the 15,343 titles with US
-    // streaming — the very bottom of the tail, and it renders on the Western
-    // page. It can only carry a badge if the DEEPEST band query is working, so
-    // it fails the moment the bands collapse back into one capped result.
+    // The canary is The Thicket (tt4058618, 6,068 votes) — in the DEEPEST vote
+    // band (d, under 8,675), so it can only carry a badge if the last band
+    // query is working, and it fails the moment the bands collapse back into
+    // one capped result.
+    // ⚑ TWO REPLACEMENTS ON 2026-08-05, and the second one is the lesson.
+    // Zorro (tt0050079) went first: it is a 1957 tvSeries, so removing
+    // television (CHARTER §7.2) took the canary out of the corpus with it.
+    // Comanche Station (tt0053729) replaced it — chosen as the lowest-ranked
+    // streaming Western in the parquet — and FAILED, because the shelves show
+    // only seven titles per subgenre and it never renders. That is exactly what
+    // the note below already warned about, and picking from the data rather
+    // than from the page walked into it anyway.
+    // ⛔ SO: choose this from the titles the page ACTUALLY RENDERS, never from
+    // the parquet alone. The selection is reproducible — scrape the rendered
+    // tt ids off /genre_pairs.html?$GENRE=Western, join them to the streaming
+    // set, and take the lowest-vote row that lands in band d.
     // (El Dorado was the first choice and is a better-known example of the bug,
     // but it never renders here — the shelves show seven per subgenre — and a
     // canary that is not on the page is a check that cannot fail for the right
@@ -620,18 +774,24 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     });
     await wn.waitForTimeout(3000);
     const canary = await wn.evaluate(() => {
-      const a = [...document.querySelectorAll('a[href*="tt0050079"]')][0];
-      return a ? { found: true, marked: !!a.querySelector('img[src*="/t/p/w45"]') } : { found: false };
+      // The mark is now a SIBLING of the link, not a child of it -- an <a>
+      // inside an <a> is invalid, so the tile was restructured. Look at the
+      // tile wrapper, not at the anchor.
+      const a = [...document.querySelectorAll('a[href*="tt4058618"]')][0];
+      if (!a) return { found: false };
+      const tile = a.parentElement;
+      return { found: true, marked: !!(tile && tile.querySelector('button[aria-label^="Streaming on"]')) };
     });
-    if (!canary.found) note("row-cap-canary", "Zorro (tt0050079) not on the Western page — check the fixture, not the cap");
-    else if (!canary.marked) note("row-cap-canary", "Zorro has US streaming but no mark — the 5,000-row cap is biting again");
-    else ok("row-cap canary marked (Zorro, rank 15252 of 15343 streaming titles)");
+    if (!canary.found) note("row-cap-canary", "The Thicket (tt4058618) not on the Western page — check the fixture, not the cap");
+    else if (!canary.marked) note("row-cap-canary", "The Thicket has US streaming but no mark — the deepest vote band is not reaching the page");
+    else ok("row-cap canary marked (The Thicket, 6068 votes, deepest band)");
 
     // A mark must not cover the caption it sits beside.
     const overlap = await wn.evaluate(() => {
       let n = 0;
       for (const a of document.querySelectorAll('a[href*="imdb.com/title/"]')) {
-        const mk = a.querySelector('img[src*="/t/p/w45"]');
+        const tile = a.parentElement;
+        const mk = tile && tile.querySelector('button[aria-label^="Streaming on"]');
         if (!mk) continue;
         const m = mk.getBoundingClientRect();
         const cap = [...a.children].slice(1).map((c) => c.getBoundingClientRect()).find((c) => c.height > 0);

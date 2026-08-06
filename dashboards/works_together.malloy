@@ -8,28 +8,21 @@ import "../index.malloy"
 // was wrong. His renderer already draws tagged columns, so availability can be
 // added as one more column IN his table: additive, no component, no redesign.
 // One row per title, so joining it cannot fan the table out.
-source: title_streaming is providers -> {
-  where: offer_kind = 'flatrate'
-  group_by: imdb_id
-  aggregate: services is string_agg(provider_name, ', ')
-} extend {
-  primary_key: imdb_id
-}
-
-source: movies_streaming is movies extend {
-  join_one: streaming is title_streaming on tconst = streaming.imdb_id
-  dimension:
-    // TMDB requires the JustWatch credit on EACH media item, so the label
-    // carries it rather than sitting once in a footer.
-    # label="Streaming (US, via JustWatch)"
-    where_to_watch is streaming.services
-}
-
+// ⛔ THE STREAMING COLUMN WAS REVERTED 2026-08-05. A fork addition nested a raw
+// `string_agg(provider_name)` beside each title here. On the ONE page the style
+// ruling protects most it: listed nine entries collapsing to five services,
+// offered Hulu to a visitor who does not subscribe to it, rendered a bare ∅ on
+// ~15 rows, and widened Lloyd's table to 1416 against his own 1280 — failing
+// every bullet of CHARTER §7.3 (one mark, personalised, hidden when you cannot
+// watch it). CHARTER §2A item 7 had already CUT the provider mark from this
+// page because it has no custom component to draw one properly. The mark lives
+// on the poster surfaces (genre_pairs, next_watch) where it can be drawn right.
+// This query is now Lloyd's again, byte for byte.
 # artifact { title="People that worked together" givens {NAME='Tom Hanks'}}
-query: works_together is movies_streaming -> works_with + {
+query: works_together is movies -> works_with + {
   where: name ~ $NAME
   nest: by_title is {
-    group_by: title, where_to_watch
+    group_by: title
     aggregate: total_ratings
   }
 }

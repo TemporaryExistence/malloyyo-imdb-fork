@@ -30,7 +30,16 @@ DUCKDB="${DUCKDB_BIN:-duckdb}"
 mkdir -p "$(dirname "$OUT")"
 cd "$ROOT"
 
-"$DUCKDB" <<SQL
+# The SQL is written through a QUOTED heredoc and the output path is injected
+# afterwards. It used to be an unquoted `<<SQL`, which meant bash expanded the
+# body -- and a pair of backticks inside a SQL *comment* on the crew-gate line
+# ran as a command substitution ("shared_crew: command not found") on every
+# build, silently blanking that comment. It was harmless only by luck: the same
+# mechanism would execute anything backticked or $-prefixed that anyone ever
+# adds to this query. A data build must not evaluate its own SQL as shell.
+SQL_FILE="$(mktemp -t taste_features.XXXXXX.sql)"
+trap 'rm -f "$SQL_FILE"' EXIT
+cat > "$SQL_FILE" <<'SQL'
 COPY (
   WITH t AS (SELECT * FROM 'docs/imdb_titles.parquet'),
   -- Only the roles that actually predict taste. 'self' and archive credits are
@@ -95,8 +104,14 @@ COPY (
   -- A person credited on a single title in the corpus can never connect two
   -- films, so they are pure weight with no recall value.
   WHERE NOT (a.kind IN ('crew','cast') AND i.df < 2)
-) TO '$OUT' (FORMAT PARQUET, COMPRESSION ZSTD);
+) TO '__OUT__' (FORMAT PARQUET, COMPRESSION ZSTD);
 SQL
+
+# Inject the path into the placeholder, then assert it actually landed -- a
+# silently-unsubstituted __OUT__ would write a file called "__OUT__".
+sed -i "s|__OUT__|$OUT|" "$SQL_FILE"
+grep -q '__OUT__' "$SQL_FILE" && { echo "output path substitution failed" >&2; exit 1; }
+"$DUCKDB" < "$SQL_FILE"
 
 "$DUCKDB" -c "
 SELECT kind, count(*) AS rows, count(DISTINCT feature) AS features,

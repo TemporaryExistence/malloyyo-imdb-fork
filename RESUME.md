@@ -1,108 +1,87 @@
-# RESUME HERE — malloyyo-imdb-fork (updated 2026-08-04, session 4)
+# RESUME HERE — malloyyo-imdb-fork (updated 2026-08-05, session 2)
 
-**Read this first, then `CHARTER.md`.**
-
----
-
-## 1. STATUS: Andrew's eight rejections are all addressed. PUSHED AND LIVE.
-
-Live at https://temporaryexistence.github.io/malloyyo-imdb-fork/ at `ac0f9fd`. Verified against the
-LIVE URL, not localhost: the served `assets/next_watch.js` is byte-identical to the local build and
-the full stress suite passes against the public site.
-
-⛔ **Sync All does NOT cover this repo.** It is absent from `sync-all.sh`'s `REPOS=()` and from the
-root `.gitignore`, so the button skips it and the root repo absorbs it as an embedded gitlink
-instead. Push with `bash scripts/push.sh` until CC lands the fix (note filed 2026-08-04).
-
-| # | His words | State |
-|---|---|---|
-| 1 | "There is no picture of the actor." | **Done.** `person_images.parquet` = 13,560 people, 11,762 portraits; all 150 in the deck have one. |
-| 2 | "The picture should be nearly full screen." | **Done.** 74vh (was a 206px tile), and it scrolls into view. |
-| 3 | "No way to switch to movies/shows, only actors." | **Done.** People / Films / Shows toggle, verified by clicking it. |
-| 4 | "'Your next watch' is useless if people haven't selected any ratings." | **Done**, without breaking §4's cold-start rule. |
-| 5 | "Overly verbose page text, AS ALWAYS." | **Done.** Every rendered string re-read and cut; longest is 9 words. |
-| 6 | "You didn't build all the features I asked for." | **Done.** Export/share (a §1 success criterion, never built) + F4's provider marks. |
-| 7 | "Doesn't allow you to sort by year or select genres to filter by." | **Done.** Genre picker + timeline, asserted to actually filter. |
-| 8 | "You seem to have missed the whole point." | **Done.** Swipe mode was two buttons; it is now a real drag. |
+**Read this, then `CHARTER.md` — and in the charter, read §7 first: it amends everything above it.**
 
 ---
 
-## 2. THE ROOT CAUSE OF "30% DONE"
+## 1. WHAT CHANGED TODAY
 
-Last session's work compiled, linted green, and was **never bundled**. It contained
-`title.genres.value ~ $GENRE` in the recommendation query — an unnest across a source already
-fanned out one row per (candidate feature × liked title). 3.1s → 60s+ locally; in DuckDB-WASM it
-**never returned**. The dashboard runs one query queue, so that single hang left **every** control
-on the page empty, with no error and `loading` stuck true.
+Andrew met Lloyd about the fork and brought back direction. It is all in **CHARTER §7**. The headline
+items, and their state:
 
-⛔ **Do not put `genres.value` (or any unnest) in a where-clause on the `scoring` source.** The
-block comment on that query says so. Genre is carried out as a plain list column and filtered in JS.
+| | State |
+|---|---|
+| Swipe tool splits into its own site | **Done** — `../movie-swipe/`, builds and runs. Name is a placeholder. |
+| Television removed from the corpus | **Done** — 24,052 → 18,965 titles, movies only. |
+| Where-to-watch collapsed to one personalised mark | **Done** — one glyph, hover shows only the visitor's services. |
+| Per-provider deep links | **Done, and bounded** — see §4. |
+| Fuzzy autofill on search | **Done** — his three examples verified in the browser. |
+| The fork's own legible recommender | **Done** — "What your ratings are doing" + a per-tile reason. |
+| **Per-page tool split + layout simplification** | **NOT STARTED.** The largest remaining item. |
 
----
+⛔ **NOTHING IS PUSHED.** The fork's changes and the whole new site are local only.
+Push the fork with `bash scripts/push.sh` — Sync All still does not cover this repo.
 
-## 3. WHAT IS ACTUALLY VERIFIED (not "it compiled")
+## 2. WHAT ANDREW OWES
 
-- `scripts/stress.js` — full adversarial suite, **green**, now with a `[6c]` section holding a check
-  for every defect this session produced (query-queue wedge, cold start, export, card size,
-  card-on-screen, affordance visible, drag, click-halves).
-- Filter assertions: Horror changes the grid; a timeline click puts **every** visible year inside
-  the selected range.
-- Gesture assertions: drag right/left, sub-threshold drag records nothing, click-halves, swipe-up
-  skip, undo.
-- Read as images at 1440×900, 1440×1200, 390×844 and dark mode.
-- Cold start measured in the browser: 28 titles, **14 film / 14 TV**.
+1. **Set `TMDB_READ_ACCESS_TOKEN` on `TemporaryExistence/malloyyo-imdb-fork`.** A fork does NOT inherit
+   the upstream repo's secrets; `gh secret list` returns empty. Until it is set, the weekly refresh
+   rebuilds the data and silently skips posters and where-to-watch. The workflow now fails loudly instead
+   of passing green, but only he can add the secret.
+2. **Name the swipe site.** `movie-swipe` is a placeholder and the repo, URL and title all follow from it.
 
-## 4. THE RATER GATE HAS RUN FIVE TIMES — read this before trusting a "done"
+## 3. THE TWO THINGS STILL OPEN, BOTH HIS ASKS
 
-| pass | score | outcome |
-|---|---|---|
-| v2 | 8.6 APPROVE | 3 residuals |
-| v3 | 7.6 NEEDS-WORK | 4 blocking gaps a GREEN suite missed |
-| v4 | 7.6 NEEDS-WORK | 3 more, incl. a dislike-only profile emptying the page |
-| v5 | 8.1 NEEDS-WORK | caught that the fold fix had SHRUNK the picture, and that my own check would have certified it |
-| — | — | all fixed; v6 not yet run |
+- **"The site feels hacky, not visually beautiful. Too crowded, too many layers, too many things to
+  click."** → simplify the layout, and give each tool **its own page** so the good ones can carry the
+  site. Not started. It restructures `dashboards/next_watch.jsx` (1,500 lines), which is why it was left
+  rather than half-done.
+- Everything else from the meeting is built.
 
-⚑ **The standing lesson: a green suite here has twice meant "extended for the known list", not
-"correct".** Every pass found real defects the suite was green over. Do not read green as done.
-⚑ **A threshold parked below what the code currently does will ratify whatever it does next** —
-`card is nearly full screen` used 0.70 while the card was at 0.82, so a drop to 0.73 passed.
+## 4. WHAT IS TRUE BUT EASY TO MISREAD
 
-### The earlier v2 gate
+- **The deep links are search routes, not canonical title pages.** TMDB returns ONE aggregate JustWatch
+  link per title per region; no licensed source has per-provider deep links. Clicking Netflix opens
+  Netflix's own search for the exact title. Services without a verified route fall back to the JustWatch
+  page. This is short of what he asked for and the code says so — do not "fix" it by guessing URLs.
+- **The browser-cache join is real but boot-bounded.** The swipe site registers the visitor's ratings as
+  a DuckDB table from a blob before the runtime starts, and Malloy joins it. It reflects ratings **as of
+  page load**, and the page says so.
+- **`docs/user_ratings.csv` in the swipe site is header-only ON PURPOSE.** The Malloy CLI compiles the
+  model against real DuckDB at build time, where no browser exists; without the file the WHOLE model
+  failed. Do not delete it for looking empty — it is the schema.
 
-**8.6/10, APPROVE (predicted). No blocking gaps.** Prior version was 5.7 NEEDS-WORK.
-Card: `agents/rater/rating-log/2026-08-04_malloyyo-imdb-fork_next-watch-v2.md`.
+## 5. CONTROLS THAT WILL CATCH THE NEXT MISTAKE
 
-- It verified all eight of Andrew's defects itself against the rendered page rather than on report.
-- **Style gate PASS, measured:** our `next_watch` gutters run 184→1256 at 1440, identical to
-  Lloyd's `genre_pairs` (it was 0→1440 before). Poster 103px/6px vs his 104px/7px; ink, type and
-  dark-mode tokens identical. *"A stranger could not tell which parts we added."*
-- Three residuals it named are **all closed** in `84516cc`: card 74vh→82vh (738 of 900 desktop,
-  692 of 844 mobile), a search empty state, and the JustWatch credit moved out of a hover-only
-  tooltip into alt text. Each has a permanent assertion in `stress.js`.
-- It checked three things against Lloyd's own pages before blaming us, and they are his: mobile
-  timeline label clipping, `works_together` vote formatting, grey rec tiles in full-page captures.
-- ⚑ **Its fourth item was NOT a taste call.** "Recommendation quality degrades on sparse input"
-  turned out to hide a reproducible **ordering inversion**: with one liked title, genre_fit spans 5%
-  while the cosine denominator spans 47%, so the denominator decided the order and The Counselor
-  (genre_fit 5.74) outranked Kingdom of Heaven (6.03) and First Knight (6.03). Fixed in `435f869`
-  for profiles under three titles only, with an unconditional stress assertion.
-
-## 5. STILL OPEN
-
-- **Rich-profile ranking is untouched and unresolved as a question.** The thin-profile inversion is
-  fixed (below), but whether the cosine is the right ranking for a RICH liked set was never
-  re-examined; measured against the validated Coen/Tarantino set, the thin-profile ordering is a
-  lateral move, so it was deliberately not applied there. Still Andrew's call if he wants it changed.
-- **Ratings-CSV import** — cut, and the build order (§2A item 8) explicitly permits it.
-- Nothing has been proposed upstream. §6.2: not until Lloyd asks.
+- `scripts/check_bands.sh` — re-derives the availability vote-band sizes from the parquet and fails
+  before the runtime's silent 5,000-row truncation bites. Wired into the refresh workflow. The literals
+  were the quartiles of a corpus WITH television and moved to 58196/18156/8675 today; **re-run this after
+  any data change.**
+- `scripts/stress.js` — the adversarial suite. Two assertions were rewritten today because they tested an
+  old implementation rather than the requirement: the provider marks (counted 16px logos that no longer
+  exist) and `thin-rank` (pasted five title names, so a correct new result read as a regression).
+- **The row-cap canary is now The Thicket (tt4058618).** Zorro was a tvSeries and left with television;
+  its first replacement never rendered on the page. **Pick a canary from the ids the page ACTUALLY
+  RENDERS, never from the parquet alone.**
 
 ## 6. HOW TO WORK ON THIS
 
 - **Bundle:** `npx --no-install malloyyo dashboard bundle --out docs --title "malloyyo-imdb-fork" --duckdb bundled --no-serve`
 - **Serve:** any no-cache static server on `docs/` at `127.0.0.1:8810`. Free the port with
   `fuser -k 8810/tcp` — a `pkill -f` pattern matches its own argv and kills the shell.
-- **Time a query before trusting it:** `npx --no-install malloy-cli run dashboards/next_watch.malloy <query>`.
-  Anything over ~5s locally will hang the browser. This is the check that would have saved the session.
+- **Data rebuild:** `bash scripts/build_data.sh` re-downloads ~1.4 GB. To rebuild from the tsv already on
+  disk, run the malloy build and the duckdb COPY directly — that is what isolated today's TV removal.
+- **After any data change:** `scripts/build_taste_features.sh`, `scripts/build_people.sh`,
+  `scripts/build_suggest_index.sh`, then `scripts/check_bands.sh`.
 - **Push:** `bash scripts/push.sh` — never a bare `git push`.
-- **Skill:** `work/.claude/skills/data-site` holds every trap this stack produces.
-- **Style ruling:** match Lloyd's visual system exactly. "Better means MORE, not DIFFERENT."
+- **Style ruling (§5, unchanged):** match Lloyd's visual system. "Better means MORE, not DIFFERENT."
+  §7.3's "simplify" means remove OUR accretion, not redesign his pages.
+
+## 7. THE STANDING LESSON, AND IT HELD AGAIN TODAY
+
+**A green suite has never meant correct here.** Today it went the other way too: three suite failures
+were investigated and **all three were the TEST, not the site** — a stale pasted title list, a canary
+that had been deleted from the corpus, and lazy-loaded images measured without scrolling. The one real
+regression (the JustWatch licence credit disappearing into a hover-only popover) was found by a check
+that tested the old implementation and had to be rewritten to test the requirement.
+Both halves of that are the same rule: **assert the property, not the moment.**

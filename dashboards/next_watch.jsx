@@ -15,6 +15,9 @@
 // continuation, not as someone else's design bolted on.
 import React from "react";
 import { filters, useGiven, useQuery } from "@malloyyo/dashboard";
+import { parseProviders, visibleServices, serviceLink, canonicalService, loadMyServices, saveMyServices } from "./lib/streaming.js";
+import { LOGO, ChipBase, StreamableMark, ServicePicker } from "./lib/streamui.jsx";
+import { SearchBox } from "./lib/searchui.jsx";
 
 /* ============================ shared viz kit ============================ */
 /* copied from genre_pairs.jsx on purpose: jsx components are sandboxed, so
@@ -240,69 +243,81 @@ function Timeline({ ink, periods, range, onSelect }) {
 /* ---------------------------------- shelves ---------------------------- */
 
 const TILE_W = 103;
-const TYPE_LABEL = { movie: "Film", tvSeries: "Series", tvMiniSeries: "Mini-series", tvMovie: "TV film" };
+// TYPE_LABEL went with television (CHARTER §7.2, 2026-08-05). The corpus is
+// films only, so every label it could return was "Film".
 
 /* --------------------------- provider marks (F1) ------------------------ */
-// TMDB requires JustWatch attribution on EACH media item, so the mark and the
-// credit travel together and neither renders without the other.
-const LOGO = (p) => (p ? "https://image.tmdb.org/t/p/w45" + p : null);
+// ChipBase, StreamGlyph, StreamableMark and ServicePicker live in
+// ./lib/streamui.jsx so this page and genre_pairs share ONE definition.
 
-// `size` because the same mark sits on a 103px grid tile and on a ~480px swipe
-// card. At a fixed 16px it was proportionate on the tile and nearly invisible on
-// the card, which is the one surface where the visitor is looking hardest.
-function ProviderMark({ ink, offers, size = 16 }) {
-  if (!offers || !offers.logos || !offers.logos.length) return null;
-  // The credit lived ONLY in a `title=` tooltip, which a touch device can never
-  // open -- so on a phone the per-item attribution was effectively absent. The
-  // logo itself carries the licence term, but the text now reaches a screen
-  // reader and a touch user through alt text rather than hover alone.
-  const credit = `${offers.names} - source: JustWatch`;
-  return (
-    <div title={credit} aria-label={credit} role="img"
-         style={{ position: "absolute", right: size <= 16 ? 3 : 8, bottom: size <= 16 ? 3 : 8, display: "flex", gap: size <= 16 ? 2 : 4 }}>
-      {offers.logos.map((p, i) => (
-        <img key={i} src={LOGO(p)} alt={i === 0 ? credit : ""} width={size} height={size} loading="lazy"
-             style={{ borderRadius: 3, boxShadow: "0 0 0 1px rgba(0,0,0,.35)", background: "#fff", display: "block" }} />
-      ))}
-    </div>
-  );
-}
-
-function Availability({ ink, offers }) {
+function Availability({ ink, offers, myServices, title, year }) {
+  const [showAll, setShowAll] = React.useState(false);
   if (!offers || !offers.length) {
     return <div style={{ color: ink.muted, fontSize: 12 }}>Not listed in the US.</div>;
   }
   const KINDS = [["flatrate", "Stream"], ["free", "Free"], ["ads", "Free with ads"], ["rent", "Rent"], ["buy", "Buy"]];
   const link = offers.find((o) => o.link)?.link;
+  const mine = new Set(myServices || []);
+  // ⛔ THE DETAIL VIEW IS NOT THE TILE. On a tile, a service the visitor does
+  // not have is noise and is hidden outright. Here they have deliberately
+  // opened "where can I watch this", so hiding the answer would be withholding
+  // it -- the non-subscribed options collapse behind one line instead.
+  const hiddenCount = mine.size
+    ? new Set(offers.filter((o) => o.offer_kind === "flatrate")
+        .map((o) => canonicalService(o.provider_name)).filter((sv) => !mine.has(sv))).size
+    : 0;
   return (
     <div style={{ display: "grid", gap: 8 }}>
       {KINDS.map(([k, label]) => {
-        const rows = offers.filter((o) => o.offer_kind === k);
+        // Collapse TMDB's reseller rows to services, so "Paramount+" appears
+        // once rather than four times (Essential, Premium, Amazon, Roku).
+        const seen = new Set();
+        const rows = [];
+        for (const o of offers) {
+          if (o.offer_kind !== k) continue;
+          const sv = canonicalService(o.provider_name);
+          if (seen.has(sv)) continue;
+          if (k === "flatrate" && mine.size && !mine.has(sv) && !showAll) continue;
+          seen.add(sv);
+          rows.push({ ...o, service: sv });
+        }
         if (!rows.length) return null;
         return (
           <div key={k} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: ink.muted,
                            fontWeight: 700, minWidth: 92 }}>{label}</span>
-            {rows.map((o, i) => (
-              <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: ink.text2 }}>
-                <img src={LOGO(o.logo_path)} alt="" width={18} height={18} loading="lazy"
-                     style={{ borderRadius: 4, background: "#fff", display: "block" }} />
-                {o.provider_name}
-              </span>
-            ))}
+            {rows.map((o, i) => {
+              const href = serviceLink(o.service, title, year, o.link || link);
+              return (
+                <a key={i} href={href || undefined} target="_blank" rel="noopener noreferrer"
+                   style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12,
+                            color: ink.text2, textDecoration: "none" }}>
+                  <img src={LOGO(o.logo_path)} alt="" width={18} height={18} loading="lazy"
+                       style={{ borderRadius: 4, background: "#fff", display: "block" }} />
+                  {o.service}
+                </a>
+              );
+            })}
           </div>
         );
       })}
+      {hiddenCount > 0 && !showAll && (
+        <button type="button" onClick={() => setShowAll(true)}
+                style={{ justifySelf: "start", font: "inherit", fontSize: 12, cursor: "pointer",
+                         background: "transparent", border: 0, padding: 0, color: ink.accent }}>
+          {hiddenCount} more service{hiddenCount === 1 ? "" : "s"} you have not selected
+        </button>
+      )}
       <div style={{ fontSize: 11, color: ink.muted, borderTop: `1px solid ${ink.track}`, paddingTop: 6 }}>
         Availability data from <b>JustWatch</b>, via TMDB. US only.{" "}
-        {link && <a href={link} target="_blank" rel="noopener noreferrer" style={{ color: ink.accent }}>Open on TMDB</a>}
+        {link && <a href={link} target="_blank" rel="noopener noreferrer" style={{ color: ink.accent }}>All options</a>}
       </div>
     </div>
   );
 }
 
 /* ------------------------------ poster tile ----------------------------- */
-function Tile({ ink, row, verdict, onRate, offers, onOpen }) {
+function Tile({ ink, row, verdict, onRate, offers, onOpen, reason }) {
   const [bad, setBad] = React.useState(false);
   const frame = {
     width: TILE_W, height: 156, borderRadius: 6, display: "block",
@@ -330,14 +345,16 @@ function Tile({ ink, row, verdict, onRate, offers, onOpen }) {
                  onError={() => setBad(true)} style={{ ...frame, objectFit: "cover" }} />
           : <div style={{ ...frame, display: "flex", alignItems: "center", justifyContent: "center",
                           color: ink.muted, fontSize: 10, textAlign: "center", padding: 6 }}>{row.primary_title}</div>}
-        <ProviderMark ink={ink} offers={offers} />
+        <StreamableMark ink={ink} offers={offers} title={row.primary_title} year={row.start_year} />
         {verdict === "up" && <Badge color={GOOD} ch="✓" />}
         {verdict === "down" && <Badge color={BAD} ch="✕" />}
       </div>
       <div style={{ fontSize: 12, fontWeight: 620, color: ink.text, marginTop: 5, lineHeight: 1.2 }}>{row.primary_title}</div>
+      {reason && (
+        <div style={{ fontSize: 10.5, color: ink.muted, marginTop: 1 }}>{reason}</div>
+      )}
       <div style={{ fontSize: 11, color: ink.muted, fontVariantNumeric: "tabular-nums" }}>
         {row.start_year ? Math.round(num(row.start_year)) : ""}
-        {row.title_type && row.title_type !== "movie" ? ` · ${TYPE_LABEL[row.title_type] || row.title_type}` : ""}
         {row.num_votes ? ` · ${compact(num(row.num_votes))}` : ""}
       </div>
     </div>
@@ -684,18 +701,33 @@ export default function Dashboard({ dashboard, givens }) {
   const seeds = useQuery({ query: "seed_titles", givens });
   const recs = useQuery({ query: "recommendations", givens });
   const recsPeople = useQuery({ query: "recommendations_by_person", givens });
+  // The visitor's own subscriptions (CHARTER §7.3). Empty on a first visit,
+  // which deliberately means "show every service" rather than "show none" --
+  // an untouched control must not make a working site look empty.
+  const [myServices, setMyServices] = React.useState(() => loadMyServices());
+  const toggleService = React.useCallback((name) => {
+    setMyServices((cur) => {
+      const next = cur.includes(name) ? cur.filter((x) => x !== name) : [...cur, name];
+      saveMyServices(next);
+      return next;
+    });
+  }, []);
+
   const avail = useQuery({ query: "availability", givens });
+  // ⛑ WIRED 2026-08-05. This query existed in the model and NOTHING read it --
+  // which is precisely Andrew's criticism: the page handed over a list with no
+  // indication of how his ratings produced it.
+  const profileQ = useQuery({ query: "taste_profile", givens });
   const detail = useQuery({ query: "availability_detail", givens });
   const found = useQuery({ query: "search_titles", givens });
   const people = useQuery({ query: "search_people", givens });
-  const seedPeople = useQuery({ query: "seed_people_typed", givens });
+  const seedPeople = useQuery({ query: "seed_people", givens });
   const popular = useQuery({ query: "popular_picks", givens });
   const vetoed = useQuery({ query: "titles_by_disliked_people", givens });
   const genreOpts = useQuery({ query: "nw_genre_options", givens });
   const periodsQ = useQuery({ query: "nw_periods", givens });
   const gGenre = useGiven("GENRE");
   const gYear = useGiven("RELEASE_YEAR");
-  const gType = useGiven("TITLE_TYPE");
   const [swipeKind, setSwipeKind] = React.useState("people");
   const personTitles = useQuery({ query: "titles_by_person", givens });
   const [person, setPerson] = React.useState("");
@@ -737,12 +769,28 @@ export default function Dashboard({ dashboard, givens }) {
   const offersFor = React.useMemo(() => {
     const m = {};
     for (const r of avail.rows || []) {
+      const all = parseProviders(r.provider_entries);
       m[r.imdb_id] = {
-        logos: String(r.logos || "").split("|").filter(Boolean).slice(0, 3),
-        names: r.names || "",
+        all,
+        // Filtered to what this visitor can actually watch on. Empty means the
+        // mark does not render -- see StreamableMark.
+        services: visibleServices(all, myServices),
+        link: r.link || null,
       };
     }
     return m;
+  }, [avail.rows, myServices]);
+
+  // Pickable services, ordered by corpus coverage. Derived from the loaded rows
+  // rather than hardcoded: TMDB renames and re-bundles providers regularly, and
+  // a static list would quietly stop matching (the same class of failure as the
+  // stale canary rank).
+  const allServices = React.useMemo(() => {
+    const count = new Map();
+    for (const r of avail.rows || [])
+      for (const p of parseProviders(r.provider_entries))
+        count.set(p.service, (count.get(p.service) || 0) + 1);
+    return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([sv]) => sv);
   }, [avail.rows]);
 
   // Seed pool, ROUND-ROBINED ACROSS GENRES. Taking the most-voted 48 gave a wall
@@ -930,19 +978,24 @@ export default function Dashboard({ dashboard, givens }) {
   // "nothing rated yet" after several deliberate swipes.
   const rated = liked.length + disliked.length + likedPeople.length + dislikedPeople.length;
 
+  // One short line per tile saying why it is there. Built from figures the
+  // scoring query ALREADY returns -- shared_crew / shared_cast / shared_genres
+  // -- so it costs no extra query and cannot drift from the ranking it explains.
+  const reasonFor = React.useCallback((r) => {
+    const crew = num(r.shared_crew), cast = num(r.shared_cast), gen = num(r.shared_genres);
+    if (crew >= 1) return `${crew} shared ${crew === 1 ? "director/writer" : "crew"}`;
+    if (cast >= 3) return `${cast} shared cast`;
+    if (gen >= 2) return `${gen} shared genres`;
+    return null;
+  }, []);
+
   // THE COLD START. Andrew: "'Your next watch' is useless if people haven't
   // selected any ratings yet." The previous fix hid the section at zero
   // ratings, which answers him and breaks CHARTER §4 in the same edit -- "the
   // tool must produce a defensible list from ZERO explicit input."
   // So at zero ratings the list is `popular_picks`: acclaimed and widely seen,
-  // inside whatever genre/period/type is selected, and LABELLED as that rather
-  // than passed off as personal.
-  // ROUND-ROBINED ACROSS TITLE TYPE. CHARTER F3 warned that ranking films and
-  // shows in one list on raw votes "would quietly bury films"; ranking on
-  // RATING buries them just as effectively in the other direction -- measured,
-  // the top 60 acclaimed titles are 46 television to 14 films, so a visitor who
-  // rates nothing sees a TV list and concludes the tool is for TV. Cycling the
-  // types preserves rating order inside each lane and shows both.
+  // inside whatever genre/period is selected, and LABELLED as that rather than
+  // passed off as personal.
   // ⛔ A NEGATIVE-ONLY PROFILE USED TO EMPTY THE PAGE. One left swipe on the
   // first face — the deck's default mode, and the most natural first gesture
   // there is — took the list from 28 tiles to 0, printed "Nothing matches those
@@ -952,22 +1005,12 @@ export default function Dashboard({ dashboard, givens }) {
   // list". CHARTER §4's cold-start rule and §1's criteria 3 and 4 both say a
   // list must be there. So the fallback is the cold-start list with the
   // visitor's negatives honoured, and it says which one it is showing.
-  const coldFallback = React.useMemo(() => {
-    const lanes = new Map();
-    for (const r of popular.rows || []) {
-      const k = r.title_type === "movie" ? "film" : "tv";
-      if (!lanes.has(k)) lanes.set(k, []);
-      lanes.get(k).push(r);
-    }
-    const out = [];
-    const ls = [...lanes.values()];
-    for (let i = 0; ls.length && out.length < 60; i++) {
-      let progressed = false;
-      for (const lane of ls) if (lane[i]) { out.push(lane[i]); progressed = true; }
-      if (!progressed) break;
-    }
-    return out;
-  }, [popular.rows]);
+  // This used to interleave a film lane and a TV lane so a mixed corpus could
+  // not open as 60 films. With television removed (CHARTER §7.2) there is one
+  // lane, and interleaving one lane is just a slower slice.
+  const coldFallback = React.useMemo(
+    () => (popular.rows || []).slice(0, 60),
+    [popular.rows]);
 
   // Three states, and each says which one it is. `personalised` is the only one
   // that may claim to be about you.
@@ -1080,7 +1123,10 @@ export default function Dashboard({ dashboard, givens }) {
   };
   const listAsText = React.useMemo(() => list.slice(0, 28).map((r) => {
     const yr = r.start_year ? ` (${Math.round(num(r.start_year))})` : "";
-    const on = offersFor[r.tconst]?.names;
+    // The exported list carries the services THIS visitor can watch on -- a
+    // copied list naming Hulu to someone without Hulu is the same defect as the
+    // on-screen mark, just pasted somewhere else.
+    const on = (offersFor[r.tconst]?.services || []).map((x) => x.service).join(", ");
     return `${r.primary_title}${yr}${on ? ` · ${on}` : ""}`;
   }).join("\n"), [list, offersFor]);
 
@@ -1256,14 +1302,7 @@ export default function Dashboard({ dashboard, givens }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [mode, card, verdicts, usePersonCard, personCard, open]);
 
-  const Chip = ({ on, onClick, children }) => (
-    <button type="button" onClick={onClick}
-      style={{ font: "inherit", fontSize: 12.5, cursor: "pointer", lineHeight: 1.15, padding: "5px 9px", borderRadius: 7,
-               background: on ? ink.accent : ink.surface, color: on ? "#fff" : ink.text2,
-               border: `1px solid ${on ? ink.accent : ink.track}`, transition: "background .12s ease, border-color .12s ease" }}>
-      {children}
-    </button>
-  );
+  const Chip = (props) => <ChipBase ink={ink} {...props} />;
 
   return (
     <div style={{ maxWidth: 1120, margin: "0 auto", padding: "22px 24px 48px", color: "var(--dash-fg)" }}>
@@ -1338,11 +1377,10 @@ export default function Dashboard({ dashboard, givens }) {
       {mode === "swipe" && (
         <div ref={stageRef} style={{ margin: "0 0 26px" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center", marginBottom: 12 }}>
-            {[["people", "People"], ["movie", "Films"], ["tvSeries", "Shows"]].map(([k, label]) => (
+            {[["people", "People"], ["movie", "Films"]].map(([k, label]) => (
               <Chip key={k} on={swipeKind === k}
                 onClick={() => {
                   setSwipeKind(k);
-                  gType.set(k === "people" ? "" : filters.oneOf(k));
                   // Re-assert AFTER the browser's focus-scroll, including when
                   // the chip was already active — that no-op click changes no
                   // state, so nothing else would put the disclaimer back.
@@ -1369,11 +1407,12 @@ export default function Dashboard({ dashboard, givens }) {
           ) : card ? (
             <SwipeStage
               ink={ink}
-              kind={card.title_type && card.title_type !== "movie" ? (TYPE_LABEL[card.title_type] || card.title_type) : "Film"}
+              kind="Film"
               image={card.poster ? card.poster.replace("/w154", "/w500") : null}
               title={card.primary_title}
               subtitle={`${card.start_year ? Math.round(num(card.start_year)) : ""} · ★ ${num(card.average_rating).toFixed(1)}`}
-              mark={<ProviderMark ink={ink} offers={offersFor[card.tconst]} size={28} />}
+              mark={<StreamableMark ink={ink} offers={offersFor[card.tconst]}
+                                    title={card.primary_title} year={card.start_year} size={28} />}
               onLike={() => { rate(card.tconst, "up"); setDeck((d) => d + 1); }}
               onDislike={() => { rate(card.tconst, "down"); setDeck((d) => d + 1); }}
               onSkip={() => skip(card.tconst)} />
@@ -1383,18 +1422,31 @@ export default function Dashboard({ dashboard, givens }) {
 
       {mode === "search" && (
         <div style={{ margin: "0 0 26px" }}>
-          <input
+          {/* Autofill tolerates a misspelling; the underlying query does not,
+              and cannot -- `contains` can never reach Michael Caine from
+              "mikel cain". Picking a suggestion sets the EXACT value, so the
+              query below is handed something it can match on the nose. */}
+          <SearchBox
+            ink={ink}
             value={q}
-            onChange={(e) => {
-              setQ(e.target.value); setPerson("");
-              const v = e.target.value;
+            placeholder="Search films and people"
+            onChange={(v) => {
+              setQ(v); setPerson("");
               // the model lowercases both sides, so send a lowercased term
               gTitle.set(v ? filters.contains(v.toLowerCase()) : "");
               gName.set(v ? filters.contains(v.toLowerCase()) : "");
             }}
-            placeholder="Search films, shows, people"
-            style={{ font: "inherit", fontSize: 14, padding: "8px 11px", borderRadius: 7, width: "min(420px, 100%)",
-                     border: `1px solid ${ink.track}`, background: ink.surface, color: ink.text }} />
+            onPickTitle={(h) => {
+              setQ(h.text); setPerson("");
+              gTitle.set(filters.contains(h.text.toLowerCase()));
+              gName.set("");
+            }}
+            onPickPerson={(h) => {
+              setQ(h.text); setPerson(h.text);
+              gTitle.set("");
+              gName.set(filters.contains(h.text.toLowerCase()));
+              gPerson.set(filters.oneOf(h.text));
+            }} />
           {q && (people.rows || []).length > 0 && (
             <div style={{ marginTop: 12 }}>
               <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase",
@@ -1442,6 +1494,43 @@ export default function Dashboard({ dashboard, givens }) {
 
       {/* ------------------------------ the list ------------------------- */}
       <div style={{ margin: "0 0 26px" }}>
+        {/* ⛑ WHY THIS LIST. Andrew, 2026-08-05: it "needs to be immediately
+            clear and apparent how it works and what your preferences do to the
+            recommendations." Deliberately compact -- the deep, table-driven
+            version of this is the swipe site's job (CHARTER §7.4); what belongs
+            here is the one line that stops the list being a black box. */}
+        {rated > 0 && (profileQ.rows || []).length > 0 && (
+          <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 8,
+                        background: ink.surface, border: `1px solid ${ink.track}` }}>
+            <div style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase",
+                          color: ink.muted, fontWeight: 700, marginBottom: 7 }}>
+              What your ratings are doing
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
+              {(profileQ.rows || []).slice(0, 8).map((r) => (
+                <span key={r.kind + r.feature}
+                      style={{ fontSize: 12, padding: "3px 8px", borderRadius: 6,
+                               border: `1px solid ${ink.track}`, color: ink.text2,
+                               background: "transparent", whiteSpace: "nowrap" }}>
+                  {r.label}
+                  <span style={{ color: ink.muted, marginLeft: 5, fontSize: 11 }}>
+                    {r.kind === "genre" ? "genre" : r.kind === "crew" ? "director/writer" : "cast"}
+                    {num(r.from_titles) > 1 ? ` ×${Math.round(num(r.from_titles))}` : ""}
+                  </span>
+                </span>
+              ))}
+            </div>
+            <div style={{ fontSize: 11.5, color: ink.muted, marginTop: 7 }}>
+              Strongest first, from {liked.length} liked {liked.length === 1 ? "title" : "titles"}.
+              A rare shared name counts for far more than a common genre, which is why one distinctive
+              director outranks Drama.
+            </div>
+          </div>
+        )}
+        {/* Placed with the list rather than up with the filters on purpose: it
+            governs what the marks ON THESE TILES say, and the top of the page
+            already carries more controls than it should (CHARTER §7.3). */}
+        <ServicePicker ink={ink} all={allServices} mine={myServices} onToggle={toggleService} />
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
           <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: ink.muted, fontWeight: 700 }}>
             Your next watch
@@ -1468,6 +1557,7 @@ export default function Dashboard({ dashboard, givens }) {
         <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, ${TILE_W}px)`, gap: 14 }}>
           {list.slice(0, 28).map((r) => (
             <Tile key={r.tconst} ink={ink} row={r} offers={offersFor[r.tconst]}
+                  reason={reasonFor(r)}
                   onOpen={() => { setOpen(r); gDetail.set(filters.oneOf(r.tconst)); }} />
           ))}
         </div>
@@ -1486,9 +1576,10 @@ export default function Dashboard({ dashboard, givens }) {
             <div style={{ fontSize: 16, fontWeight: 700, color: ink.text }}>{open.primary_title}</div>
             <div style={{ fontSize: 12, color: ink.muted, margin: "3px 0 14px" }}>
               {open.start_year ? Math.round(num(open.start_year)) : ""} · ★ {num(open.average_rating).toFixed(1)} ·{" "}
-              {TYPE_LABEL[open.title_type] || open.title_type} · {compact(num(open.num_votes))} ratings
+              {compact(num(open.num_votes))} ratings
             </div>
-            <Availability ink={ink} offers={detail.rows || []} />
+            <Availability ink={ink} offers={detail.rows || []} myServices={myServices}
+                          title={open.primary_title} year={open.start_year} />
             <button type="button" onClick={() => setOpen(null)}
               style={{ marginTop: 16, font: "inherit", fontSize: 12.5, cursor: "pointer", padding: "6px 11px",
                        borderRadius: 7, background: ink.surface, color: ink.text2, border: `1px solid ${ink.track}` }}>Close</button>

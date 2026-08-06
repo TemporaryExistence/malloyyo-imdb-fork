@@ -10,10 +10,21 @@ given:
 // Queries for the recommender. The scoring rationale lives in next_watch.malloy.
 
 #" What the liked titles have in common, strongest signal first
-query: taste_profile is taste_features -> {
+// ⛑ NOW NAMED, and that is the point. Andrew's ruling on 2026-08-05: the fork
+// needs its own next-watch features and "it needs to be immediately clear and
+// apparent how it works and what your preferences do to the recommendations."
+// A profile whose strongest signals read `nm0000233` explains nothing, so the
+// person features are resolved to names here rather than left as ids the UI
+// would have to look up one at a time.
+query: taste_profile is taste_features_named -> {
   where: tconst ~ $LIKED
-  group_by: kind, feature
-  aggregate: weight is feature_weight
+  group_by:
+    kind
+    feature
+    label is pick named.name when named.name is not null else feature
+  aggregate:
+    weight is feature_weight
+    from_titles is count()
   order_by: weight desc
   limit: 60
 }
@@ -44,7 +55,6 @@ query: recommendations is scoring -> {
   group_by:
     tconst
     primary_title is title.primaryTitle
-    title_type is title.titleType
     start_year is title.startYear
     average_rating is title.averageRating
     num_votes is title.numVotes
@@ -79,11 +89,9 @@ query: seed_titles is movies -> {
   where: numVotes > 150000
      and genres.value ~ $GENRE
      and startYear ~ $RELEASE_YEAR
-     and titleType ~ $TITLE_TYPE
   group_by:
     tconst
     primary_title is primaryTitle
-    title_type is titleType
     start_year is startYear
     average_rating is averageRating
     num_votes is numVotes
@@ -102,7 +110,6 @@ query: search_titles is movies -> {
   group_by:
     tconst
     primary_title is primaryTitle
-    title_type is titleType
     start_year is startYear
     average_rating is averageRating
     num_votes is numVotes
@@ -120,13 +127,30 @@ query: availability is providers -> {
   where: offer_kind = 'flatrate'
   group_by: imdb_id
   aggregate:
-    logos is string_agg(logo_path, '|')
-    names is string_agg(provider_name, ', ')
+    // ONE atomic entry per provider: "id~:~name~:~logo", entries joined by ~|~.
+    // The previous shape aggregated logos and names into two separate delimited
+    // strings and trusted them to come back in the same order -- string_agg
+    // makes no such promise, and the personalised mark added in CHARTER §7.3
+    // has to know WHICH provider each logo belongs to in order to decide
+    // whether the visitor actually subscribes to it. Misalignment there would
+    // offer someone Hulu under a Netflix logo, which is precisely the failure
+    // the feature exists to prevent.
+    // Multi-character delimiters rather than an escape sequence: a single-quoted
+    // literal does not process backslash escapes in this engine, so '\u001f'
+    // would have been the six literal characters, not a separator -- and it
+    // would have "worked" right up until a provider name contained a comma.
+    provider_entries is string_agg(
+      concat(provider_id::string, '~:~', provider_name, '~:~', coalesce(logo_path, '')), '~|~')
     attribution is max(attribution)
+    // TMDB's own JustWatch link for the title. It is the ONLY exact-title URL
+    // available (there are no per-provider deep links in this data), so it is
+    // the fallback behind every service whose own search route is unverified.
+    link is max(link)
     votes is title.numVotes.max()
   // ⛔ THE RUNTIME CAPS A RESULT AT 5,000 ROWS, whatever `limit` says --
-  // measured, not assumed. 15,343 titles have streaming, so a third get
-  // through and WHICH third was arbitrary: the browser was handed obscure
+  // measured, not assumed. 11,631 films have US streaming (re-measured after
+  // television left the corpus, CHARTER §7.2), so under half get through and
+  // WHICH half was arbitrary: the browser was handed obscure
   // titles while 42 of the 48 most-voted posters on screen lost a badge they
   // had every right to. Ordering by popularity makes the 5,000 that survive
   // the ones actually being looked at. A truncated result that still renders
@@ -165,7 +189,6 @@ query: titles_by_person is movies -> {
   group_by:
     tconst
     primary_title is primaryTitle
-    title_type is titleType
     start_year is startYear
     average_rating is averageRating
     num_votes is numVotes
@@ -181,22 +204,9 @@ query: titles_by_person is movies -> {
 // ⚠ Liking a person raises THEIR weight; it does not mark their filmography as
 // liked. Conflating the two would recommend the worst film of a favourite
 // actor's career and call it a match.
-#" Well-known people to swipe on
-query: seed_people is movies -> {
-  // ONLY roles that exist in taste_features (actor/actress -> cast,
-  // director/writer -> crew). The first version grouped over every principal,
-  // so the deck opened on Hans Zimmer -- a composer, who carries no feature at
-  // all, meaning the swipe changed nothing. A card that cannot affect the
-  // result is worse than no card.
-  where: numVotes > 200000
-     and principals.category = 'actor' | 'actress' | 'director' | 'writer'
-  group_by: person is name, nconst is principals.nconst
-  aggregate:
-    titles is title_count
-    total_ratings
-  order_by: total_ratings desc
-  limit: 120
-}
+// The photoless `seed_people` query that used to sit here was superseded by
+// `seed_people` on `movies_with_faces` below (portraits were Andrew's first
+// rejection) and had no caller left. Removed 2026-08-05.
 
 #" Titles carrying a person the visitor swiped right on
 // Separate from `recommendations` on purpose: see the OR note there. One swipe
@@ -206,12 +216,10 @@ query: recommendations_by_person is scoring -> {
     // same reason as `recommendations`: no `genres.value` unnest on this source
     feature ~ $LIKED_PEOPLE
     and title.numVotes ~ $MIN_VOTES
-    and title.titleType ~ $TITLE_TYPE
     and title.startYear ~ $RELEASE_YEAR
   group_by:
     tconst
     primary_title is title.primaryTitle
-    title_type is title.titleType
     start_year is title.startYear
     average_rating is title.averageRating
     num_votes is title.numVotes
@@ -261,11 +269,10 @@ source: movies_with_faces is movies extend {
   join_one: face is person_images on principals.nconst = face.nconst
 }
 
-#" People to swipe on, split by whether their work is film or television
-query: seed_people_typed is movies_with_faces -> {
+#" People to swipe on
+query: seed_people is movies_with_faces -> {
   where: numVotes > 200000
      and (principals.category = 'actor' | 'actress' | 'director' | 'writer')
-     and titleType ~ $TITLE_TYPE
   group_by:
     person is name
     nconst is principals.nconst
@@ -292,11 +299,9 @@ query: popular_picks is movies -> {
      and averageRating >= 7.5
      and genres.value ~ $GENRE
      and startYear ~ $RELEASE_YEAR
-     and titleType ~ $TITLE_TYPE
   group_by:
     tconst
     primary_title is primaryTitle
-    title_type is titleType
     start_year is startYear
     average_rating is averageRating
     num_votes is numVotes

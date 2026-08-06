@@ -106,43 +106,54 @@ query: genre_periods is movies -> {
 // still bare. The cap is the runtime's, and asking louder does not move it.
 //
 // So the result is SPLIT INTO FOUR VOTE BANDS at the quartiles of the streamable
-// set, each ~3,836 rows and comfortably under the cap, merged in the UI. Four
+// set, each comfortably under the cap, merged in the UI.
+// ⚑ THE THRESHOLDS ARE MEASURED, AND THEY MOVE. They were 50400/16866/8414,
+// the quartiles of a corpus that still contained television; removing TV
+// (CHARTER §7.2) shifted them to 58196/18156/8675 and the bands to ~2,908 rows
+// each. A literal that silently stops matching the data is the recurring trap
+// on this project, so `scripts/check_bands.sh` now re-derives them from the
+// parquet and fails the build if any band approaches the cap. Re-run it after
+// every data refresh; do not hand-edit these numbers without it. Four
 // queries of a third the size beat one that silently drops two thirds of its
 // answer. The bands are vote quartiles because votes are already the axis the
 // page orders by, so a band maps to a coherent slice rather than an arbitrary one.
 #" Where to watch — most-watched band
 query: availability is providers -> {
-  where: offer_kind = 'flatrate' and title.numVotes >= 50400
+  where: offer_kind = 'flatrate' and title.numVotes >= 58196
   group_by: imdb_id
   aggregate:
-    logos is string_agg(logo_path, '|')
-    names is string_agg(provider_name, ', ')
+    provider_entries is string_agg(
+      concat(provider_id::string, '~:~', provider_name, '~:~', coalesce(logo_path, '')), '~|~')
+    link is max(link)
   limit: 5000
 }
 #" Where to watch — upper-middle band
 query: availability_b is providers -> {
-  where: offer_kind = 'flatrate' and title.numVotes >= 16866 and title.numVotes < 50400
+  where: offer_kind = 'flatrate' and title.numVotes >= 18156 and title.numVotes < 58196
   group_by: imdb_id
   aggregate:
-    logos is string_agg(logo_path, '|')
-    names is string_agg(provider_name, ', ')
+    provider_entries is string_agg(
+      concat(provider_id::string, '~:~', provider_name, '~:~', coalesce(logo_path, '')), '~|~')
+    link is max(link)
   limit: 5000
 }
 #" Where to watch — lower-middle band
 query: availability_c is providers -> {
-  where: offer_kind = 'flatrate' and title.numVotes >= 8414 and title.numVotes < 16866
+  where: offer_kind = 'flatrate' and title.numVotes >= 8675 and title.numVotes < 18156
   group_by: imdb_id
   aggregate:
-    logos is string_agg(logo_path, '|')
-    names is string_agg(provider_name, ', ')
+    provider_entries is string_agg(
+      concat(provider_id::string, '~:~', provider_name, '~:~', coalesce(logo_path, '')), '~|~')
+    link is max(link)
   limit: 5000
 }
 #" Where to watch — long tail
 query: availability_d is providers -> {
-  where: offer_kind = 'flatrate' and title.numVotes < 8414
+  where: offer_kind = 'flatrate' and title.numVotes < 8675
   group_by: imdb_id
   aggregate:
-    logos is string_agg(logo_path, '|')
-    names is string_agg(provider_name, ', ')
+    provider_entries is string_agg(
+      concat(provider_id::string, '~:~', provider_name, '~:~', coalesce(logo_path, '')), '~|~')
+    link is max(link)
   limit: 5000
 }

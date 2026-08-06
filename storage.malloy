@@ -31,3 +31,8 @@ source: watch_providers_table is duckdb.table('docs/data/watch_providers.parquet
 // scripts/fetch_person_images.py. A person card without a face is just a name
 // in a box.
 source: person_images_table is duckdb.table('docs/data/person_images.parquet') extend {}
+
+// FORK ADDITION: nconst -> name for the ~16k people who carry real credits,
+// built by scripts/build_people.sh. imdb_names.parquet already has this, but
+// it is 5.8 MB of 141,356 rows and the pages that need a NAME need these ones.
+source: people_named_table is duckdb.table('docs/data/people.parquet') extend {}

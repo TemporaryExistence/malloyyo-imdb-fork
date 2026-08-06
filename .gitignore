@@ -14,3 +14,8 @@ MANIFESTS
 # fork additions
 node_modules/
 scripts/_*.js
+
+# scratch verification artifacts (kept on disk, never in the diff Lloyd reads)
+scripts/_*.png
+scripts/__pycache__/
+scripts/_*.cjs

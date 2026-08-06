@@ -22,6 +22,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # FORK ADDITION. A fork does NOT inherit the upstream repo's secrets, and
+      # both TMDB steps below are `continue-on-error`, so a fork with no token
+      # produces a GREEN run that quietly ships stale posters and stale "where
+      # to watch" -- on a site whose whole point is telling you where to watch.
+      # Verified 2026-08-05: this repo had ZERO secrets set, and the first
+      # scheduled run had not yet landed. So the credential is checked up front
+      # and the verdict is carried to a final assert step, which fails the run
+      # AFTER the data has still been committed. Loud, without discarding the
+      # half of the refresh that needs no credential.
+      - name: Check TMDB credential
+        id: tmdbcheck
+        env:
+          TMDB_READ_ACCESS_TOKEN: ${{ secrets.TMDB_READ_ACCESS_TOKEN }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: |
+          if [ -z "${TMDB_READ_ACCESS_TOKEN:-}" ] && [ -z "${TMDB_API_KEY:-}" ]; then
+            echo "::error::No TMDB credential. Set the TMDB_READ_ACCESS_TOKEN repo secret (Settings -> Secrets and variables -> Actions). Posters and watch providers will NOT refresh until you do."
+            echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ -n "${TMDB_READ_ACCESS_TOKEN:-}" ]; then
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${TMDB_READ_ACCESS_TOKEN}" \
+              "https://api.themoviedb.org/3/configuration")
+          else
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "https://api.themoviedb.org/3/configuration?api_key=${TMDB_API_KEY}")
+          fi
+          # 401 is the credential; anything else non-200 is TMDB's problem, not
+          # ours, and must not be reported as a dead key.
+          if [ "$code" = "401" ]; then
+            echo "::error::TMDB rejected the credential (HTTP 401). Rotate the token and update the repo secret."
+            echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$code" != "200" ]; then
+            echo "::warning::TMDB configuration probe returned HTTP $code -- treating as a transient outage, not a bad key."
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -80,6 +118,15 @@ jobs:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: python3 scripts/fetch_watch_providers.py --regions US
 
+      # FORK ADDITION. The where-to-watch marks are split into four vote bands
+      # sized to stay under the runtime's silent 5,000-row truncation. A data
+      # refresh moves the distribution those bands were cut from, and the
+      # failure is invisible -- posters simply lose their badge. This re-derives
+      # the band sizes from the freshly built parquet and fails while there is
+      # still headroom. Not continue-on-error: a wrong badge is the product.
+      - name: Check availability vote-bands still fit
+        run: bash scripts/check_bands.sh
+
       - name: Commit refreshed data
         run: |
           git config user.name  github-actions
@@ -94,3 +141,13 @@ jobs:
           # success, not failure.
           git commit -m "refresh data $(date -u +%F)" || exit 0
           git push
+
+      # FORK ADDITION. Runs LAST, on purpose: the data above is already
+      # committed, so a missing or rejected TMDB credential costs the run its
+      # green tick without costing the refresh. A silently-skipped provider
+      # fetch is the failure mode this exists to make visible.
+      - name: Assert the TMDB credential was usable
+        if: steps.tmdbcheck.outputs.ok != 'true'
+        run: |
+          echo "Posters and watch providers did NOT refresh -- see the 'Check TMDB credential' step." >&2
+          exit 1

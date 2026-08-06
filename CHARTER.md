@@ -292,3 +292,134 @@ Lloyd that we have not verified end to end.
 **Consequence of (2) for how we work:** upstream is wired as the `upstream` remote. Keep our changes
 reviewable as a diff against Lloyd's `main` — no gratuitous reformatting, no moving his files, no
 rewriting his prose. If he does invite a PR, it should read as additive.
+
+---
+
+# 7. AMENDMENT — 2026-08-05, after Andrew met Lloyd about the fork
+
+Andrew met Lloyd in person and brought back direction. This section **amends** everything above; where it
+conflicts with §1–§6, this section wins. Nothing above is deleted — the original reasoning stays readable
+so a later session can see what changed and why.
+
+## 7.1 The fork's goal, restated in Lloyd's terms
+
+> **A clear and easy-to-use tool built on Malloy/Malloyyo that helps users with films and actors from that
+> starting data set.**
+
+Two words carry the weight. **Clear** — the site currently reads as crowded and layered, and that is now a
+defect, not a matter of taste. **Films and actors** — one data set, not two.
+
+## 7.2 What LEAVES the fork
+
+### The swipe tool splits off into its own site (reverses part of F5)
+Lloyd's view: the Tinder-style swipe deck is **not what he envisioned** for the tool he was building. It
+stays a live project — it just stops being part of his tool. It gets its own repo, its own site, its own
+name, and work on it continues there.
+
+### Television is removed (REVERSES F3 outright)
+Lloyd does not want the data sets intermingled. `transform.malloy` goes back to `titleType = 'movie'`, the
+corpus rebuilds, and every artifact keyed off the title list re-derives. F3's reasoning in §2 was sound on
+its own terms and is now moot: **this is Lloyd's tool, and the corpus is his call.**
+
+⛔ **The TV-specific accommodations built for F3 become dead weight and must be removed with it**, not left
+behind: the run-as-a-range handling in the timeline and era affinity, the vote-count normalisation between
+films and series, and the film/TV split in the cold start. Code left behind for a data shape that no longer
+exists is exactly the "hacky" accretion §7.3 is about.
+
+## 7.3 What the fork must become — the criticisms, as acceptance criteria
+
+**It reads as hacky, not beautiful.** Too many visual layers, too many placement styles, too many separate
+controls that each re-cut the data on a different part of the screen. The layout gets simplified.
+
+**One page per tool, not every tool on one page.** Separate pages let the genuinely useful tools become
+clear winners and take the focus of the site. A crowded page hides which tool is the good one.
+
+**Where-to-watch is too busy, and the fix is personalisation, not decoration.**
+- The user picks which streaming platforms they have access to.
+- The provider row collapses to a **single "Streamable" icon** — an icon, **not the word**.
+- **Hovering it reveals only the platforms that user actually has.**
+- If a title streams *only* on platforms the user does not have, **the icon does not appear at all**.
+
+Andrew's own set, which is the working test case: Prime, Netflix, Paramount+, AppleTV, Peacock. **Not**
+Hulu, **not** Disney+, and no non-free options. Hovering must never offer him Hulu.
+
+**Provider marks deep-link to the title, not to the service.** Clicking Netflix on The Truman Show opens
+the Truman Show page on Netflix. Same for every platform and every title.
+⚠ **Known constraint, resolve it honestly:** TMDB returns **one aggregate JustWatch link per title per
+region**, not per-provider deep links (`fetch_watch_providers.py` line 22 says so). Per-provider deep links
+must be constructed, and each pattern must be verified against a real title before it ships. Where no
+reliable pattern exists, the JustWatch link is the honest fallback — a link that lands somewhere wrong is
+worse than one that admits what it is.
+
+**Search gets fuzzy autofill suggestions** (Andrew's own addition, not Lloyd's):
+- `mikel cain` reaches **Michael Caine**
+- `batman` lists the Batman films
+- `Brad pi` autofills to **Brad Pitt** as the first suggestion
+
+Client-side over the parquet already in the browser, consistent with §3 — no autocomplete API.
+
+**The recommender stays in the fork, and it must be legible.** *(Andrew's ruling, 2026-08-05, overriding
+the proposal to move it wholesale to the swipe site: "Fork needs its own features for determining your
+next watch. It needs to be immediately clear and apparent how it works and what your preferences do to the
+recommendations.")* So **both** sites carry one: the fork gets a clear, immediately-apparent recommender;
+the swipe site gets the deep explainable one described in §7.4.
+
+## 7.4 The new swipe site
+
+**Hosting (Andrew, 2026-08-05):** static site on **GitHub Pages**, same DuckDB-WASM stack and same deploy
+path as the fork, plus a **small homelab endpoint** for the preferences table. This isolates the server
+dependency to one call instead of moving the whole site onto the box.
+
+⛔ **This amends §3's "no backend" constraint FOR THE SWIPE SITE ONLY.** The fork stays fully static with
+nothing leaving the visitor's machine — that is still the architectural advantage that makes its
+recommender possible at all. The swipe site deliberately trades it for persistence, and the trade is
+recorded here so nobody later reads the two as inconsistent.
+
+What the swipe site owns:
+- The swipe deck itself.
+- **Four outcomes, not three:** like / dislike / haven't seen / **want to watch**. "Want to watch" is not a
+  taste signal in the same direction as a like — it is intent, and it belongs in the output list, not
+  averaged into the profile.
+- **A deck that is not the same every time.** Today every card appears in the same order on every visit.
+  Order is weighted by popularity but **slightly randomised**, so a repeat visit differs without burying
+  the visitor in obscurity.
+- **Preferences persist**, stored on the homelab server in a **malloyyo table**.
+- **The deep explainable profile**, which is the substance of the criticism:
+  - a **table of what the user selected**, visible, not inferred;
+  - results broken into **categories derived from those selections**;
+  - **genre crossover preserved** — below the deck, sections like `Comedy + Drama` holding titles in that
+    intersection starring the liked actors;
+  - **dislikes filter out**, they do not merely score lower: a disliked actor's titles are removed;
+  - **intersection ordering follows the profile** — liking action and thrillers puts `Action + Thriller`
+    near the top; disliking comedies keeps `Action + Comedy` away from it;
+  - **titles inside each intersection sort by liked actors**, with disliked actors removed.
+
+## 7.5 Lloyd's browser-cache question, to be answered with working code
+
+> **Lloyd:** *"How would I write something in the browser cache? If I like a movie, can I store that in a
+> table in the browser cache and maybe join it into the tables?"*
+
+**Yes, and it should be built rather than described.** The taste profile is persisted client-side and
+**registered with DuckDB-WASM as a real table**, so Malloy queries **join against it** instead of the
+current arrangement where JS filters results after the query returns. This is the mechanism both sites
+should sit on, and it is a better answer to Lloyd than a paragraph.
+
+⚠ It does not repeal the §2 performance rule: **no unnest in a where-clause on the `scoring` source.**
+Joining a small liked-titles table is not the same operation as fanning out `genres.value`.
+
+## 7.6 The TMDB key
+
+Lloyd said the key **refreshes weekly** and that he **already had a key in the program**. Andrew does not
+know the mechanism, and neither did the person writing this: TMDB v3 API keys and v4 read tokens do not
+expire on their own, and the workflow currently reads a long-lived repo secret. **Establish what actually
+rotates before automating anything**, then automate whatever is real.
+
+Independently and regardless of the answer: `refresh-data.yml` wraps both TMDB steps in
+`continue-on-error: true`, so a dead key produces a green run with stale providers. **A failed auth must be
+loud.** That is true whether or not anything rotates weekly.
+
+## 7.7 What did NOT change
+
+§5's style ruling stands and is now doing more work, not less: **match Lloyd's visual system; better means
+MORE, not DIFFERENT.** "Simplify the layout" is an instruction to remove *our* accretion, not a licence to
+redesign his pages. §6.2 also stands — nothing is proposed upstream until Lloyd asks.

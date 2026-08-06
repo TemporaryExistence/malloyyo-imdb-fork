@@ -12,6 +12,8 @@
 // import), so there is no shared local module to import.
 import React from "react";
 import { filters, useGiven, useQuery } from "@malloyyo/dashboard";
+import { parseProviders, visibleServices, loadMyServices, saveMyServices } from "./lib/streaming.js";
+import { StreamableMark, ServicePicker } from "./lib/streamui.jsx";
 
 /* ============================ shared viz kit ============================ */
 const INK = {
@@ -55,27 +57,9 @@ const compact = (n) =>
 /* ========================== end shared viz kit ========================= */
 
 /* --------------------- FORK ADDITION: where to watch -------------------- */
-// TMDB requires JustWatch to be credited on EACH media item, so the mark and
-// its attribution travel together -- the title text on the badge carries it.
-const LOGO = (p) => (p ? "https://image.tmdb.org/t/p/w45" + p : null);
-// One row per title now (see the query), so `offers` is {logos, names} rather
-// than a list of offer rows. The credit is in alt text as well as the tooltip:
-// a touch device can never open a title= tooltip, which made the per-item
-// attribution TMDB requires effectively absent on a phone.
-function ProviderMark({ offers }) {
-  if (!offers || !offers.logos || !offers.logos.length) return null;
-  const credit = `${offers.names} - source: JustWatch`;
-  return (
-    <span title={credit} aria-label={credit} role="img"
-          style={{ position: "absolute", right: 3, bottom: 3, display: "flex", gap: 2 }}>
-      {offers.logos.map((p, i) => (
-        <img key={i} src={LOGO(p)} alt={i === 0 ? credit : ""} width={16} height={16} loading="lazy"
-             style={{ borderRadius: 3, background: "#fff", display: "block",
-                      boxShadow: "0 0 0 1px rgba(0,0,0,.35)" }} />
-      ))}
-    </span>
-  );
-}
+// StreamableMark and ServicePicker live in ./lib/streamui.jsx, shared with
+// next_watch. TMDB requires JustWatch credited on EACH media item; the mark
+// carries that in its own label, so the two travel together wherever it renders.
 
 // A given holds a filter EXPRESSION ('Comedy'), not a bare value. Unwrap for
 // display, re-wrap with filters.oneOf when writing back.
@@ -275,51 +259,64 @@ const TILE_W = 104;
 function Tile({ ink, row, offers }) {
   const [bad, setBad] = React.useState(false);
   const frame = { width: TILE_W, height: 156, borderRadius: 7, background: ink.track, overflow: "hidden", display: "block" };
+  // ⛔ THE MARK IS A SIBLING OF THE LINK, NOT A CHILD OF IT. The tile used to be
+  // one big <a> with the mark inside; that was fine while the mark was inert
+  // decoration, and became invalid the moment it grew a button and its own
+  // links -- an <a> inside an <a> is not valid HTML and the browser silently
+  // restructures the DOM around it, which breaks the tile's own click. So the
+  // outer element is a positioned <div>, the poster and caption are the link,
+  // and the mark sits beside it.
   return (
-    <a
-      href={row.movie_url || undefined}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={`${row.title} (${row.release_year})`}
-      style={{ width: TILE_W, flex: "none", textDecoration: "none", color: "inherit", display: "block",
-               position: "relative" }}
-    >
-      {/* The mark is anchored to the POSTER, not to the whole tile. Anchored to
-          the tile its bottom:3 sat on the caption, and 34 of 123 marks covered
-          the year and vote count (worst case 54px of text). Invisible while only
-          three marks rendered; obvious the moment the query was fixed. */}
-      <span style={{ position: "relative", display: "block", width: TILE_W, height: 156 }}>
-        {row.movie_image && !bad ? (
-          <img
-            src={row.movie_image}
-            alt={`Poster for ${row.title}`}
-            width={TILE_W}
-            height={156}
-            loading="lazy"
-            onError={() => setBad(true)}
-            style={{ ...frame, objectFit: "cover" }}
-          />
-        ) : (
-          <div style={{ ...frame, display: "grid", placeItems: "center" }} aria-hidden="true">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={ink.muted} strokeWidth="1.5">
-              <rect x="3" y="3" width="18" height="18" rx="2.5" />
-              <path d="m4 16 4.5-4.5 3 3L15 11l5 5" />
-            </svg>
-          </div>
-        )}
-        <ProviderMark offers={offers} />
+    <div style={{ width: TILE_W, flex: "none", position: "relative" }}>
+      <a
+        href={row.movie_url || undefined}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={`${row.title} (${row.release_year})`}
+        style={{ textDecoration: "none", color: "inherit", display: "block" }}
+      >
+        {/* The mark is anchored to the POSTER, not to the whole tile. Anchored
+            to the tile its bottom:3 sat on the caption, and 34 of 123 marks
+            covered the year and vote count (worst case 54px of text). */}
+        <span style={{ position: "relative", display: "block", width: TILE_W, height: 156 }}>
+          {row.movie_image && !bad ? (
+            <img
+              src={row.movie_image}
+              alt={`Poster for ${row.title}`}
+              width={TILE_W}
+              height={156}
+              loading="lazy"
+              onError={() => setBad(true)}
+              style={{ ...frame, objectFit: "cover" }}
+            />
+          ) : (
+            <div style={{ ...frame, display: "grid", placeItems: "center" }} aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={ink.muted} strokeWidth="1.5">
+                <rect x="3" y="3" width="18" height="18" rx="2.5" />
+                <path d="m4 16 4.5-4.5 3 3L15 11l5 5" />
+              </svg>
+            </div>
+          )}
+        </span>
+        <div style={{
+          fontSize: 12.5, fontWeight: 600, color: ink.text, lineHeight: 1.28,
+          marginTop: 7,
+          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+        }}>
+          {row.title}
+        </div>
+        <div style={{ fontSize: 11, color: ink.muted, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+          {row.release_year} · {compact(row.total_votes)}
+        </div>
+      </a>
+      {/* Positioned against the poster box, which is the first 156px of the
+          tile -- same visual result as before, valid markup this time. */}
+      <span style={{ position: "absolute", left: 0, top: 0, width: TILE_W, height: 156, pointerEvents: "none" }}>
+        <span style={{ pointerEvents: "auto" }}>
+          <StreamableMark ink={ink} offers={offers} title={row.title} year={row.release_year} />
+        </span>
       </span>
-      <div style={{
-        fontSize: 12.5, fontWeight: 600, color: ink.text, lineHeight: 1.28,
-        marginTop: 7,
-        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
-      }}>
-        {row.title}
-      </div>
-      <div style={{ fontSize: 11, color: ink.muted, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
-        {row.release_year} · {compact(row.total_votes)}
-      </div>
-    </a>
+    </div>
   );
 }
 
@@ -380,22 +377,43 @@ export default function Dashboard({ dashboard, givens }) {
   // FORK ADDITION: US availability, indexed by title so a tile lookup is O(1).
   // Four vote bands, merged. One query cannot answer this: 15,343 titles have US
   // streaming and the runtime caps a result at 5,000 rows regardless of `limit`
-  // (measured — raising it to 20,000 changed nothing on screen).
+  // (measured — raising it to 20,000 changed nothing on screen). The band cuts
+  // are re-derived by scripts/check_bands.sh, which fails the data refresh if
+  // the distribution moves under them.
   const avail = useQuery({ query: "availability", givens });
   const availB = useQuery({ query: "availability_b", givens });
   const availC = useQuery({ query: "availability_c", givens });
   const availD = useQuery({ query: "availability_d", givens });
+  // The visitor's own subscriptions, shared with next_watch through the same
+  // localStorage key -- picking Netflix on one page must not leave the other
+  // page still offering Hulu.
+  const [myServices, setMyServices] = React.useState(() => loadMyServices());
+  const toggleService = React.useCallback((name) => {
+    setMyServices((cur) => {
+      const next = cur.includes(name) ? cur.filter((x) => x !== name) : [...cur, name];
+      saveMyServices(next);
+      return next;
+    });
+  }, []);
+
   const offersFor = React.useMemo(() => {
     const m = {};
     for (const q of [avail, availB, availC, availD]) {
       for (const r of q.rows || []) {
-        m[r.imdb_id] = {
-          logos: String(r.logos || "").split("|").filter(Boolean).slice(0, 3),
-          names: r.names || "",
-        };
+        const all = parseProviders(r.provider_entries);
+        m[r.imdb_id] = { all, services: visibleServices(all, myServices), link: r.link || null };
       }
     }
     return m;
+  }, [avail.rows, availB.rows, availC.rows, availD.rows, myServices]);
+
+  const allServices = React.useMemo(() => {
+    const count = new Map();
+    for (const q of [avail, availB, availC, availD])
+      for (const r of q.rows || [])
+        for (const p of parseProviders(r.provider_entries))
+          count.set(p.service, (count.get(p.service) || 0) + 1);
+    return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([sv]) => sv);
   }, [avail.rows, availB.rows, availC.rows, availD.rows]);
   const gGenre = useGiven("GENRE");
   const gYear = useGiven("RELEASE_YEAR");
@@ -477,6 +495,11 @@ export default function Dashboard({ dashboard, givens }) {
         range={range}
         onSelect={(lo, hi) => gYear.set(lo == null ? "" : filters.between(lo, (hi ?? lo) + 4))}
       />
+
+      {/* Sits directly above the shelves it governs, not up with the genre and
+          period controls: it changes what the MARKS say, not which films are
+          shown, and grouping it with the filters would read as a third filter. */}
+      <ServicePicker ink={ink} all={allServices} mine={myServices} onToggle={toggleService} />
 
       <div style={{ opacity: stale ? 0.45 : 1, transition: "opacity .15s ease" }}>
         {shelvesQ.error ? (

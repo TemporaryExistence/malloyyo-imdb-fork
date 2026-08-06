@@ -41,8 +41,8 @@ given:
   LIKED :: filter<string> is f'__none__'
   # label="Disliked"
   DISLIKED :: filter<string> is f'__none__'
-  # label="Type"
-  TITLE_TYPE :: filter<string> is f''
+  // TITLE_TYPE was removed 2026-08-05 with television itself (CHARTER §7.2).
+  // The corpus is films only, so a type filter had exactly one value.
   # label="Minimum votes"
   MIN_VOTES :: filter<number> is f'>= 40000'
   // which title's full viewing options to fetch; sentinel so the un-opened
@@ -71,6 +71,15 @@ given:
 // because TMDB requires the credit on each media item, not once in a footer.
 source: person_images is person_images_table extend {
   primary_key: nconst
+}
+
+// taste_features with the person features resolved to names, for the "what
+// your ratings are doing" strip. A separate source rather than an inline
+// `extend` in the query: the inline form does not put the join alias in scope
+// for group_by in this Malloy version ("'named' is not defined").
+source: taste_features_named is taste_features_table extend {
+  join_one: named is people_named_table on feature = named.nconst
+  measure: feature_weight is idf.sum()
 }
 
 source: providers is watch_providers_table extend {
