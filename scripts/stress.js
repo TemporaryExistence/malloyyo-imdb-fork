@@ -151,13 +151,46 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
 
   console.log("\n[6] the recommender actually produces a list");
   {
-    const p = await cleanPage(b, { width: 1440, height: 1100 });
-    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    // ⛑ RETARGETED ACROSS THE PAGE SPLIT (2026-08-07). Rating and the list are no
+    // longer the same page: rate.html collects verdicts, next_watch.html shows the
+    // result. The assertion is unchanged in meaning — "rating produces a list" —
+    // but it now has to CROSS the split to test it, which makes it a stronger check
+    // than before: it also proves the profile survives the page boundary, which is
+    // the one thing the split could plausibly break.
+    // ⛔ Both pages are opened in the SAME browser context on purpose. The handoff
+    // is localStorage; a fresh context per page would silently test nothing.
+    // ⛔ NOT cleanPage(). `cleanPage` installs an addInitScript that removes
+    // `nwProfile.v1` on EVERY navigation — correct for the isolated page checks,
+    // fatal here: this phase's whole point is that the profile SURVIVES the hop
+    // from rate.html to next_watch.html, and the init script wiped it mid-test.
+    // It reported "next_watch reports nothing rated" — a suite artefact that reads
+    // exactly like a broken product (the failure mode the cleanPage comment warns
+    // about, arriving from the other direction). Clear once, by hand, then leave
+    // storage alone. Same exemption the persistence test already takes.
+    const p = await b.newPage({ viewport: { width: 1440, height: 1100 } });
+    await p.goto(BASE + "/rate.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.evaluate(() => { try { localStorage.removeItem("nwProfile.v1"); } catch (e) {} });
+    await p.reload({ waitUntil: "domcontentloaded", timeout: 120000 });
     await p.waitForTimeout(16000);
-    const tiles = await p.locator('img[alt^="Poster for"]').all();
-    for (const t of tiles.slice(0, 5)) { await t.click(); await p.waitForTimeout(250); }
-    await p.waitForTimeout(9000);
+    // ⛔ CLICK THE CONTROL, NOT THE POSTER. The rateable element is the tile's
+    // role=button wrapper (kit.jsx); the <img> inside it is overlaid by the mark
+    // row, so Playwright reports "<div> intercepts pointer events" and retries
+    // until it times out — which is how this phase hung on 2026-08-07. Targeting
+    // the actual control is also the more honest test: it asserts the thing a
+    // keyboard or screen-reader user reaches.
+    const tiles = await p.locator('[role="button"][aria-label^="Rate "]').all();
+    if (tiles.length < 5) note("rate-page", `only ${tiles.length} rateable tiles on rate.html`);
+    for (const t of tiles.slice(0, 5)) { await t.click(); await p.waitForTimeout(300); }
+    await p.waitForTimeout(3000);
+    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(14000);
     const txt = await p.evaluate(() => document.body.innerText);
+    // The profile must have crossed. Without this, a next_watch showing its cold
+    // "top rated" fallback would still satisfy the count check below and the split
+    // could be quietly broken while the suite stayed green.
+    if (!/Rated [1-9]\d* so far/.test(txt))
+      note("profile-handoff", "rated on rate.html but next_watch.html reports nothing rated");
+    else ok("profile crosses rate.html -> next_watch.html");
     // Keyed on the COUNTS, not on the sentence. The first version matched the
     // literal "N suggestions from N ratings" and went red the moment that copy
     // was cut, reporting a broken recommender that was working perfectly --
@@ -169,6 +202,12 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // "rating must not be mouse-only", which is about RATING, not about swiping,
     // so it survives the deck's departure — it just has to point at where rating
     // happens now. The grid tile is a real focusable control; Enter toggles it.
+    // ⛑ MOVED TO rate.html (2026-08-07). The assertion is "rating must not be
+    // mouse-only", which is about RATING — so it follows rating to its new page
+    // rather than being deleted because the Grid chip left next_watch. Deleting an
+    // assertion because its UI moved is how coverage silently drops.
+    await p.goto(BASE + "/rate.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(14000);
     await p.getByRole("button", { name: "Grid" }).click();
     await p.waitForTimeout(1200);
     const tile = p.locator('[role="button"][aria-label^="Rate "]').first();
@@ -187,8 +226,13 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // rendered 28 posterless boxes, search was case-sensitive, and provider
     // marks reached 6 of 48 posters. A suite that cannot see the actual product
     // failing is worse than none, so each is now asserted directly.
-    const p = await cleanPage(b, { width: 1440, height: 1100 });
+    // Plain newPage, not cleanPage: this phase now navigates between rate.html and
+    // next_watch.html, and cleanPage's addInitScript would wipe the shared profile
+    // on each hop (see [6]).
+    const p = await b.newPage({ viewport: { width: 1440, height: 1100 } });
     await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.evaluate(() => { try { localStorage.removeItem("nwProfile.v1"); } catch (e) {} });
+    await p.reload({ waitUntil: "domcontentloaded", timeout: 120000 });
     await p.waitForTimeout(17000);
 
     // ⚑ THE CONTRACT CHANGED ON 2026-08-05 AND SO DID THIS CHECK. The mark used
@@ -230,9 +274,17 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       else ok(`the mark opens ${pop.n} linked service(s)`);
     }
 
-    const tiles = await p.locator('img[alt^="Poster for"]').all();
-    for (const t of tiles.slice(0, 5)) { await t.click(); await p.waitForTimeout(220); }
-    await p.waitForTimeout(9000);
+    // ⛑ RATING MOVED TO rate.html (2026-08-07 page split), and the tile's role=button
+    // wrapper is the clickable control — the <img> is overlaid by the mark row, so
+    // clicking it times out on "intercepts pointer events". Rate there, then come
+    // back here for the recommendation-poster coverage check, which is next_watch's.
+    await p.goto(BASE + "/rate.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(14000);
+    const tiles = await p.locator('[role="button"][aria-label^="Rate "]').all();
+    for (const t of tiles.slice(0, 5)) { await t.click(); await p.waitForTimeout(240); }
+    await p.waitForTimeout(3000);
+    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(12000);
     // ⚑ SCROLL FIRST. The recommendation grid is far below the fold and its
     // posters are loading="lazy", so measuring naturalWidth without scrolling
     // counts images the browser deliberately never fetched: 19 of 28 "missing"
@@ -253,6 +305,9 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     if (recImgs.n && recImgs.loaded < recImgs.n * 0.8) note("rec-posters", `${recImgs.loaded}/${recImgs.n} rendered`);
     else ok(`rec list posters (${recImgs.loaded}/${recImgs.n})`);
 
+    // Search is a RATING tool and moved to rate.html with the rest of the input side.
+    await p.goto(BASE + "/rate.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(13000);
     await p.getByRole("button", { name: "Search" }).click();
     await p.waitForTimeout(400);
     const box = p.locator('input[placeholder*="Search"]');
@@ -271,8 +326,15 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
   // defect, add the assertion that would have caught it.
   console.log("\n[6c] the defects THIS session produced");
   {
-    const p = await cleanPage(b, { width: 1440, height: 900 });
+    // ⛔ NOT cleanPage: this block now hops rate.html <-> next_watch.html (the
+    // 2026-08-07 split), and cleanPage's addInitScript removes nwProfile.v1 on
+    // EVERY navigation — it silently wiped the Gladiator like mid-test and the
+    // thin-rank check then graded the COLD list, reporting a ranking failure that
+    // was really the harness. Clear once, by hand.
+    const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
     await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.evaluate((k) => { try { localStorage.removeItem(k); } catch (e) {} }, PROFILE_KEY);
+    await p.reload({ waitUntil: "domcontentloaded", timeout: 120000 });
     await p.waitForTimeout(17000);
 
     // 1. QUERIES MUST RESOLVE, NOT JUST NOT-ERROR. A `genres.value` unnest in
@@ -332,6 +394,12 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
 
     // 5. A NO-MATCH SEARCH must say so. It rendered silent white space, which
     // makes a typo indistinguishable from a page that has stopped working.
+    // Search is a rating tool and lives on rate.html since the 2026-08-07 split;
+    // everything above this line is genuinely next_watch's (genre chips, timeline,
+    // cold-start label, export, thin-rank), which is why this block stays split
+    // across both pages instead of being retargeted wholesale.
+    await p.goto(BASE + "/rate.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(14000);
     await p.getByRole("button", { name: "Search" }).click();
     await p.waitForTimeout(800);
     const sbox = p.locator('input[placeholder*="Search"]');
@@ -367,7 +435,14 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       note("thin-rank", "could not seed the single-like case (Gladiator not first in search)");
     } else {
       await g1.click();
-      await p.waitForTimeout(9000);
+      await p.waitForTimeout(4000);
+      // ⛑ SEED HERE, READ THERE (2026-08-07 split). The like is given on rate.html,
+      // but the RANKING under test is the recommendation list, which is next_watch's.
+      // Reading "the last 103px grid on the page" without moving returns the SEARCH
+      // results instead — which is exactly what this check reported when it failed
+      // with "Gladiator, Gladiator II, Gladiator": three search hits, not a ranking.
+      await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+      await p.waitForTimeout(14000);
       const list = await p.evaluate(() => {
         const grids = [...document.querySelectorAll("div")].filter((d) =>
           d.style && d.style.gridTemplateColumns && d.style.gridTemplateColumns.includes("103px"));
@@ -399,7 +474,8 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     const p2 = await cleanPage(b, { width: 1440, height: 1200 });
     const uploads = [];
     p2.on("request", (r) => { if (r.method() === "POST" || /upload/i.test(r.url())) uploads.push(r.url()); });
-    await p2.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    // The IMDb import control moved to rate.html with the rest of the input side.
+    await p2.goto(BASE + "/rate.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await p2.waitForTimeout(17000);
     const FIX = __dirname + "/../fixtures";
     await p2.locator("input[type=file]").setInputFiles(FIX + "/letterboxd.csv");
@@ -497,7 +573,11 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
   console.log("\n[6d] the swipe deck's DEFAULT mode, and the mobile fold");
   {
     const p = await cleanPage(b, { width: 1440, height: 900 });
-    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    // ⛑ RETARGETED TO rate.html (2026-08-07 page split): this block's subject is
+    // RATING (grid / search / import / undo / "not seen" / persistence), and every
+    // one of those controls moved to rate.html. The assertions are unchanged; only
+    // the page that hosts the thing under test changed.
+    await p.goto(BASE + "/rate.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await p.waitForTimeout(17000);
     // ⛑ RETARGETED FROM THE DECK TO SEARCH (2026-08-06). The DEFECT this guards
     // is not "a left swipe did nothing" — it is "a person DISLIKE reaches state
@@ -561,8 +641,13 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       }
     }
     // A modal with no keyboard exit is a trap.
-    await p.getByRole("button", { name: "Grid" }).click();
-    await p.waitForTimeout(2500);
+    // ⛑ THE DETAIL MODAL STAYED ON next_watch (2026-08-07 split): it belongs to the
+    // OUTPUT surface, and its opener is the recommendation tile, whose wrapper is
+    // labelled "Open <title>". rate.html's tiles are labelled "Rate <title>" because
+    // rating, not opening, is their job — so this check has to move to the page that
+    // still has a modal rather than be dropped for lack of a selector.
+    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(15000);
     await p.locator('div[aria-label^="Open "]').first().click();
     await p.waitForTimeout(3500);
     await p.keyboard.press("Escape");
@@ -585,7 +670,11 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
   console.log("\n[6e] profile sign, session history, viewport matrix, and swipe feel");
   {
     const p = await cleanPage(b, { width: 1440, height: 900 });
-    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    // ⛑ RETARGETED TO rate.html (2026-08-07 page split): this block's subject is
+    // RATING (grid / search / import / undo / "not seen" / persistence), and every
+    // one of those controls moved to rate.html. The assertions are unchanged; only
+    // the page that hosts the thing under test changed.
+    await p.goto(BASE + "/rate.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await p.waitForTimeout(17000);
     // A DISLIKE-ONLY PROFILE. One real dislike from cold took the list from 28
     // tiles to 0, printed "Nothing matches those filters." with no filter set,
@@ -595,7 +684,13 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     await p.getByRole("button", { name: "Grid" }).click();
     await p.waitForTimeout(2500);
     await p.locator('button[data-rate="title"][aria-label^="Not for me: "]').first().click();
-    await p.waitForTimeout(7000);
+    await p.waitForTimeout(3500);
+    // The dislike is ENTERED on rate.html; what the defect was about — the LIST
+    // collapsing to zero and the export unmounting — is next_watch's surface. Both
+    // halves are needed, so the check crosses the split rather than measuring the
+    // rating page for tiles it was never supposed to have.
+    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(15000);
     const neg = await p.evaluate(() => ({
       tiles: document.querySelectorAll('div[aria-label^="Open "]').length,
       copy: [...document.querySelectorAll("button")].filter((x) => /^Copy (link|list)$/.test(x.textContent)).length,
@@ -614,16 +709,32 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // The session-history part is preserved deliberately — the original bug was a
     // stale closure and reproduced only after a modal had already been opened and
     // closed once, so a fresh load would not have caught it.
-    await p.getByRole("button", { name: "Grid" }).click(); await p.waitForTimeout(2000);
+    // ⛑ RE-EXPRESSED, NOT DELETED (2026-08-07 page split). The original pressed keys
+    // through an open modal and asserted the RATING COUNTER behind it did not move.
+    // After the split those two things are on different pages: the detail modal is
+    // next_watch's, and next_watch has no rating controls or counter at all — so the
+    // original interaction cannot be performed, and a test that cannot fail is worse
+    // than no test.
+    // What actually protects against the defect NOW is structural: the page that
+    // owns the modal owns no way to rate. That is what is asserted, so if a future
+    // change puts rating controls back onto next_watch this check goes red and the
+    // key-leak class becomes reachable again.
+    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(15000);
     await p.locator('div[aria-label^="Open "]').first().click(); await p.waitForTimeout(3000);
+    for (let i = 0; i < 4; i++) { await p.keyboard.press("Enter"); await p.waitForTimeout(300); }
+    await p.waitForTimeout(2000);
+    const leak = await p.evaluate(() => ({
+      counter: /\d+ liked · \d+ not for you/.test(document.body.innerText),
+      rateControls: document.querySelectorAll('[role="button"][aria-label^="Rate "], button[data-rate]').length,
+      modalOpen: /Availability data from/.test(document.body.innerText),
+    }));
+    if (leak.rateControls > 0)
+      note("modal-keys", `next_watch exposes ${leak.rateControls} rating control(s) behind its modal — the key-leak class is reachable again`);
+    else if (leak.counter)
+      note("modal-keys", "next_watch renders a rating counter, so it is a rating surface again");
+    else ok("the modal's page owns no rating control, so keys cannot leak into a rating");
     await p.keyboard.press("Escape"); await p.waitForTimeout(1200);
-    const cA = await p.evaluate(() => (document.body.innerText.match(/\d+ liked · \d+ not for you/) || [""])[0]);
-    await p.locator('div[aria-label^="Open "]').first().click(); await p.waitForTimeout(3000);
-    for (let i = 0; i < 4; i++) { await p.keyboard.press("Enter"); await p.waitForTimeout(350); }
-    await p.waitForTimeout(2500);
-    const cB = await p.evaluate(() => (document.body.innerText.match(/\d+ liked · \d+ not for you/) || [""])[0]);
-    if (cA !== cB) note("modal-keys", `keys rated a tile behind the modal (${cA} -> ${cB})`);
-    else ok("keys do not leak through the detail modal");
     await p.close();
 
     // ⛑ SWIPE FEEL and the VIEWPORT FOLD MATRIX left with the deck (2026-08-06).
@@ -735,7 +846,11 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // report a persistence failure that is really the harness. It clears ONCE,
     // by hand, so the block still starts from an empty profile.
     const sk = await b.newPage({ viewport: { width: 1440, height: 900 } });
-    await sk.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    // ⛑ RETARGETED TO rate.html (2026-08-07 page split): this block's subject is
+    // RATING (grid / search / import / undo / "not seen" / persistence), and every
+    // one of those controls moved to rate.html. The assertions are unchanged; only
+    // the page that hosts the thing under test changed.
+    await sk.goto(BASE + "/rate.html", { waitUntil: "domcontentloaded", timeout: 120000 });
     await sk.evaluate((k) => { try { localStorage.removeItem(k); } catch (e) {} }, PROFILE_KEY);
     await sk.reload({ waitUntil: "domcontentloaded", timeout: 120000 });
     await sk.waitForTimeout(18000);

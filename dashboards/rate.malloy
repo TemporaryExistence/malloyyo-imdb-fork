@@ -1,0 +1,32 @@
+##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
+import "../index.malloy"
+import "./shared_queries.malloy"
+
+// "Tell it what you like" — the INPUT half of the fork, split out of next_watch
+// on 2026-08-07 (NEXT-LAYOUT-WORK.md §3, Andrew's heaviest-weighted item:
+// "instead of making one page that is crowded and has every tool jammed in,
+// let's make different pages for different tools").
+//
+// This page's ONE job is collecting verdicts. `next_watch` reads them back and
+// its one job is the output. They share the visitor's profile through
+// `dashboards/lib/profile.js` (localStorage) and through the URL givens, so
+// there is no server and no new plumbing between them.
+//
+// ⛑ THE GIVENS BELOW ARE DECLARED HERE, NOT IMPORTED. Malloy's `import` does not
+// re-export another dashboard's `given:` block, and a dashboard artifact can only
+// bind givens declared in its own model. They intentionally mirror next_watch's
+// so a link carrying ratings works in either direction.
+
+given:
+  # label="Year"
+  RELEASE_YEAR :: filter<number> is f''
+
+// ── the rating pool ────────────────────────────────────────────────────────────
+// The artifact is the SHARED `seed_titles` (./shared_queries.malloy), not a copy.
+// A first draft of this page defined its own `rate_seed` with the same shape;
+// that is exactly the duplication the split is supposed to avoid, so it was
+// deleted once the import mechanism was proven to work.
+# artifact { title="Rate what you've seen" givens { GENRE="" RELEASE_YEAR="" } }
+# dashboard
+#" Well-known films to react to
+query: rate_page is seed_titles

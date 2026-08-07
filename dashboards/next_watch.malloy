@@ -1,5 +1,10 @@
 ##! experimental.virtual_source experimental.persistence experimental.join_types experimental.givens experimental.access_modifiers
 import "../index.malloy"
+// seed_titles, search_titles, availability, search_people and titles_by_person
+// moved to ./shared_queries.malloy on 2026-08-07 — the `rate` page needs the same
+// five, and two copies of `availability` would mean two answers to "where can I
+// watch this".
+import "./shared_queries.malloy"
 
 // Dashboard-local, exactly as genre_pairs.malloy declares its own. GENRE is
 // shared from imdb.malloy; the year range is per-page in upstream's design.
@@ -80,84 +85,8 @@ query: recommendations is scoring -> {
   limit: 400
 }
 
-// --- the cold start ---------------------------------------------------------
-// Seed titles for the poster grid and the swipe deck. Widely-known enough that
-// a visitor has an opinion, spread across genres so each tap discriminates
-// instead of confirming what everything already shares (CHARTER §4.1).
-#" Well-known titles to rate, spread across genres
-query: seed_titles is movies -> {
-  where: numVotes > 150000
-     and genres.value ~ $GENRE
-     and startYear ~ $RELEASE_YEAR
-  group_by:
-    tconst
-    primary_title is primaryTitle
-    start_year is startYear
-    average_rating is averageRating
-    num_votes is numVotes
-    poster is movie_image
-    genre is genres.value
-  order_by: num_votes desc
-  limit: 400
-}
 
-// --- search (F6) ------------------------------------------------------------
-#" Find a specific title to rate
-query: search_titles is movies -> {
-  // lowercased both sides: `batman` returned 0 while `Batman` returned 27,
-  // and the failure was silent -- no result, no empty state, no hint why
-  where: lower(primaryTitle) ~ $TITLE
-  group_by:
-    tconst
-    primary_title is primaryTitle
-    start_year is startYear
-    average_rating is averageRating
-    num_votes is numVotes
-    poster is movie_image
-  order_by: num_votes desc
-  limit: 40
-}
 
-// --- availability (F1) ------------------------------------------------------
-#" One row per title: the streaming services it is on, for the poster mark.
-// Returning every offer row meant 220,963 rows, which the runtime truncates --
-// so most posters silently lost their badge. Collapsing to one row per title
-// makes coverage complete AND the payload an order of magnitude smaller.
-query: availability is providers -> {
-  where: offer_kind = 'flatrate'
-  group_by: imdb_id
-  aggregate:
-    // ONE atomic entry per provider: "id~:~name~:~logo", entries joined by ~|~.
-    // The previous shape aggregated logos and names into two separate delimited
-    // strings and trusted them to come back in the same order -- string_agg
-    // makes no such promise, and the personalised mark added in CHARTER §7.3
-    // has to know WHICH provider each logo belongs to in order to decide
-    // whether the visitor actually subscribes to it. Misalignment there would
-    // offer someone Hulu under a Netflix logo, which is precisely the failure
-    // the feature exists to prevent.
-    // Multi-character delimiters rather than an escape sequence: a single-quoted
-    // literal does not process backslash escapes in this engine, so '\u001f'
-    // would have been the six literal characters, not a separator -- and it
-    // would have "worked" right up until a provider name contained a comma.
-    provider_entries is string_agg(
-      concat(provider_id::string, '~:~', provider_name, '~:~', coalesce(logo_path, '')), '~|~')
-    attribution is max(attribution)
-    // TMDB's own JustWatch link for the title. It is the ONLY exact-title URL
-    // available (there are no per-provider deep links in this data), so it is
-    // the fallback behind every service whose own search route is unverified.
-    link is max(link)
-    votes is title.numVotes.max()
-  // ⛔ THE RUNTIME CAPS A RESULT AT 5,000 ROWS, whatever `limit` says --
-  // measured, not assumed. 11,631 films have US streaming (re-measured after
-  // television left the corpus, CHARTER §7.2), so under half get through and
-  // WHICH half was arbitrary: the browser was handed obscure
-  // titles while 42 of the 48 most-voted posters on screen lost a badge they
-  // had every right to. Ordering by popularity makes the 5,000 that survive
-  // the ones actually being looked at. A truncated result that still renders
-  // is the worst kind of bug -- nothing fails, it is just quietly wrong.
-  order_by: votes desc
-  limit: 5000
-}
 
 #" Every viewing option for ONE title, for the detail view
 query: availability_detail is providers -> {
@@ -166,46 +95,7 @@ query: availability_detail is providers -> {
   order_by: provider_name
 }
 
-// --- people search (F6 / F4) -------------------------------------------------
-// Naming one actor or director is far cheaper for a visitor than naming ten
-// films, so a person is a legitimate way in. Picking one does NOT mark their
-// filmography as liked -- that would recommend someone the worst film of a
-// favourite actor's career and call it a match. It surfaces their titles to
-// rate, which is the honest version of "seed from a person" (CHARTER F4).
-// ⛑ `nconst` added 2026-08-06, and it is load-bearing. A person VERDICT is keyed
-// on the nconst, because `LIKED_PEOPLE`/`DISLIKED_PEOPLE` are matched against
-// `taste_features.feature`, which holds an nconst for person features (see the
-// `people_named_table on feature = named.nconst` join). Grouping by name alone
-// meant the search results could name a person but never rate one — so the ONLY
-// way to record a person verdict was the swipe deck, which is leaving the fork.
-// Upstream's own `name_options` groups by `name, principals.nconst` in this same
-// source, so this is his pattern, not a new one.
-#" Find a person
-query: search_people is movies -> {
-  where: lower(name) ~ $NAME
-  group_by:
-    person is name
-    nconst is principals.nconst
-  aggregate:
-    titles is title_count
-    total_ratings
-  order_by: total_ratings desc
-  limit: 24
-}
 
-#" Titles featuring the named person, to rate
-query: titles_by_person is movies -> {
-  where: name ~ $PERSON_EXACT
-  group_by:
-    tconst
-    primary_title is primaryTitle
-    start_year is startYear
-    average_rating is averageRating
-    num_votes is numVotes
-    poster is movie_image
-  order_by: num_votes desc
-  limit: 40
-}
 
 // --- people as swipe cards (CHARTER F5) --------------------------------------
 // An actor card is a COARSE, high-leverage signal: one swipe touches every title
