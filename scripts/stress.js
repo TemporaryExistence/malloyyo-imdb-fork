@@ -70,7 +70,13 @@ async function cleanPage(b, viewport) {
 const fails = [];
 const note = (t, m) => { fails.push(`${t}: ${m}`); console.log(`  FAIL  ${t} - ${m}`); };
 const ok = (t) => console.log(`  ok    ${t}`);
-const POISON = /\bNaN\b|\bundefined\b|\bInfinity\b|\[object Object\]|&quot;|NaN%/;
+// ⛔ `Infinity` MUST NOT MATCH A FILM TITLE. The corpus contains "Avengers: Infinity
+// War", so a bare \bInfinity\b flagged a correct page the moment the crossover
+// sections put that film on screen — a false failure that reads exactly like a real
+// number-formatting bug. The poison form is Infinity STANDING ALONE as a value
+// (optionally signed, optionally with a unit), never followed by another word.
+// Same care is not needed for NaN/undefined: no title contains them.
+const POISON = /\bNaN\b|\bundefined\b|[-+]?\bInfinity\b(?!\s+\p{L})|\[object Object\]|&quot;|NaN%/u;
 
 async function check(page, label, opts) {
   opts = opts || {};
@@ -968,6 +974,82 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
       note("cold-greeting", "no route to rate.html at all — the greeting fix became a dead end");
     else ok("the rating route still exists, below the list");
     await p.close();
+  }
+
+  // ⚡ THE COLD-START CACHE, ASSERTED. Andrew, 2026-08-07: "make the site load all
+  // titles/thumbnails/content right away for users who have not inserted any specific
+  // preferences yet." docs/cold-start.json is built by scripts/build_cold_start.sh and
+  // renders before DuckDB-WASM has booted (10.7s -> 1.5s on next_watch, 8.2s -> 1.9s
+  // on rate). Three ways this silently rots, so three assertions:
+  //   1. the cache 404s -> the .catch() degrades to the slow path and NOTHING looks
+  //      broken, it is just slow again. That already happened once (the fetch was
+  //      resolved against import.meta.url, i.e. docs/assets/, not the page).
+  //   2. the cache is stale/empty -> a blank or wrong homepage.
+  //   3. the hand-off breaks -> rating something empties the page while the engine
+  //      boots. That also already happened: one gate instead of two.
+  console.log("\n[6h] the cold page is INSTANT, and hands off to the engine");
+  {
+    const p = await cleanPage(b, { width: 1440, height: 1100 });
+    const t0 = Date.now();
+    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    let painted = null;
+    for (let i = 0; i < 40; i++) {
+      const n = await p.evaluate(() => document.querySelectorAll('div[aria-label^="Open "]').length);
+      if (n >= 30) { painted = Date.now() - t0; break; }
+      await p.waitForTimeout(250);
+    }
+    // 5s, not 1.5s: the bound is "before the engine could possibly have booted"
+    // (~6s measured), so it fails on a REGRESSION rather than on a slow CI box.
+    if (painted === null) note("cold-start", "next_watch never reached 30 tiles");
+    else if (painted > 5000) note("cold-start", `next_watch took ${painted}ms to paint — the cache is not being used`);
+    else ok(`next_watch paints a full cold page in ${painted}ms`);
+
+    const cached = await p.evaluate(() => performance.getEntriesByType("resource")
+      .filter((e) => /cold-start\.json/.test(e.name))
+      .map((e) => ({ n: e.name, size: e.encodedBodySize || e.transferSize || 0 })));
+    if (!cached.length) note("cold-start", "cold-start.json was never requested");
+    else if (!cached.some((c) => c.size > 20000))
+      note("cold-start", `cold-start.json returned ${JSON.stringify(cached)} — a 404 returns 0 bytes and degrades silently`);
+    else ok(`cold-start.json served (${Math.round(cached[0].size / 1024)}KB)`);
+    await p.close();
+
+    // The hand-off. Rate on rate.html, return, and require the page NOT to go empty
+    // while the engine is still starting.
+    const q = await cleanPage(b, { width: 1440, height: 1100 });
+    await q.goto(BASE + "/rate.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await q.waitForTimeout(6000);
+    const yes = q.locator('button[data-rate="title"][aria-label^="Yes: "]').first();
+    if (!(await yes.count())) note("cold-start", "rate.html offered no rating control within 6s");
+    else {
+      await yes.click();
+      await q.waitForTimeout(3000);
+      await q.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+      // ⛔ WAIT FOR THE FIRST PAINT BEFORE WATCHING FOR EMPTINESS. Sampling from t=0
+      // counts the ordinary pre-mount frame — zero tiles because React has not run yet —
+      // and reports "the list went EMPTY at ~0ms", which is the harness describing a
+      // page load, not a defect. The claim under test is that the list must not go
+      // empty AFTER it has had content, which is the regression a single gate caused.
+      let painted2 = false;
+      for (let i = 0; i < 40 && !painted2; i++) {
+        painted2 = (await q.evaluate(() => document.querySelectorAll('div[aria-label^="Open "]').length)) > 0;
+        if (!painted2) await q.waitForTimeout(500);
+      }
+      if (!painted2) note("cold-start", "after rating, next_watch never painted a single tile");
+      else {
+        let broke = null;
+        for (let i = 0; i < 30; i++) {
+          const st = await q.evaluate(() => ({
+            tiles: document.querySelectorAll('div[aria-label^="Open "]').length,
+            empty: /Nothing matches those filters/.test(document.body.innerText),
+          }));
+          if (st.tiles === 0 || st.empty) { broke = i * 500; break; }
+          await q.waitForTimeout(500);
+        }
+        if (broke !== null) note("cold-start", `after rating, the list EMPTIED ${broke}ms after painting — the cache dropped before the engine answered`);
+        else ok("after rating, the page never empties while the engine boots");
+      }
+    }
+    await q.close();
   }
 
   console.log("\n[7] internal links resolve");

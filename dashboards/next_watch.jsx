@@ -23,6 +23,38 @@ import { loadProfile, saveProfile, profileIsEmpty,
 
 import { INK, GOOD, BAD, useTheme, num, compact, GenrePicker, periodLabel, Timeline, TILE_W, Availability, Tile, CopyButton, Badge } from "./lib/kit.jsx";
 
+/* ⚡ THE COLD PAGE IS A FILE, NOT A QUERY (2026-08-07, Andrew's ask: "a clean
+   homepage with no user data loads instantly").
+
+   MEASURED, which is what drove this: chrome painted at 1.4s, the parquets finished
+   downloading at 2.4s, and the first poster did not appear until ~8s. A/B-ing every
+   remaining query showed none of them dominated — roughly 5.5s is DuckDB-WASM booting
+   and the Malloy model compiling, spent BEFORE any query executes. Query tuning cannot
+   go under that floor, because the engine has to exist first.
+
+   A visitor with no profile always sees the SAME page, so it does not need an engine —
+   it needs a file. `scripts/build_cold_start.sh` computes exactly that page at BUILD
+   time with the duckdb CLI and writes docs/cold-start.json; this fetch starts at module
+   scope, so it is in flight before React has mounted and lands in tens of milliseconds.
+
+   ⛔ IT IS A CACHE, SO IT DEFERS TO THE ENGINE, NEVER OVERRIDES IT. The moment the
+   visitor rates anything the live queries are authoritative and this is dropped. It is
+   also the reason the bounds in build_cold_start.sh must track `pair_titles`: a cache
+   that drifts from its source shows one page cold and a different one after the first
+   click. */
+let COLD = null;
+// ⛔ RESOLVED AGAINST THE DOCUMENT, NOT import.meta.url. The bundle lives in
+// docs/assets/, so `new URL("./cold-start.json", import.meta.url)` asked for
+// docs/assets/cold-start.json and 404'd — silently, because the .catch() degrades to
+// the slow path by design. The page stayed at ~8s and looked like the cache simply
+// had not helped. `document.baseURI` is the PAGE, which is where the file sits.
+const COLD_READY = fetch(new URL("cold-start.json", document.baseURI))
+  .then((r) => (r.ok ? r.json() : null))
+  .then((d) => { COLD = Array.isArray(d) ? d[0] : d; return COLD; })
+  // A missing/broken cache must degrade to the old behaviour (slower, still correct),
+  // never to a blank page. This is the whole reason it is a cache and not the source.
+  .catch(() => null);
+
 /* The viz kit (ink tokens, GenrePicker, Timeline, Tile, Availability, Badge,
    CopyButton) moved to ./lib/kit.jsx on 2026-08-07 so the new `rate` page and
    this one share ONE definition. Splitting the page in two while leaving two
@@ -117,9 +149,59 @@ export default function Dashboard({ dashboard, givens }) {
   useDebouncedGiven(gLiked, liked);
   useDebouncedGiven(gDisliked, disliked);
 
+  /* ⚑ COLD-LOAD LATENCY: SKIP THE QUERIES THAT CANNOT ANSWER YET (2026-08-07).
+     Measured, not guessed (scripts/_perf.cjs): the parquets finish loading at
+     ~2.4s and the first poster did not appear until ~10.7s — eight seconds of
+     DuckDB-WASM compute, most of it spent on queries whose inputs are empty.
+     A first-time visitor has no ratings, so `recommendations`,
+     `recommendations_by_person`, `taste_profile` and `titles_by_disliked_people`
+     all run a full scoring pass to return nothing. The search and person queries
+     are likewise dead until someone types.
+     `useQuery` takes `skip`, so they are simply not run until their input exists.
+     ⛔ NOTHING IS GATED THAT THE COLD PAGE RENDERS: `popular_picks` (the cold
+     list), `pair_titles` (the crossovers) and `availability` (the marks) always
+     run — gating those would trade latency for the blank page CHARTER §4 forbids. */
+  // Kept apart from title verdicts on purpose. A liked PERSON raises their
+  // weight in the profile; it never marks their filmography as liked.
+  const [peopleVerdicts, setPeopleVerdicts] = React.useState(() => seed.current.people);
+  const likedPeople = React.useMemo(
+    () => Object.keys(peopleVerdicts).filter((k) => peopleVerdicts[k] === "up"), [peopleVerdicts]);
+  // ⛔ A LEFT SWIPE ON A PERSON USED TO GO NOWHERE. Only the liked set was ever
+  // pushed into a given, so in the deck's DEFAULT mode half of every verdict the
+  // visitor gave was silently discarded — the counter did not move and the list
+  // did not change. CHARTER F5: "A disliked actor is a strong negative and
+  // should be treated as one."
+  const dislikedPeople = React.useMemo(
+    () => Object.keys(peopleVerdicts).filter((k) => peopleVerdicts[k] === "down"), [peopleVerdicts]);
+  /* ⛑ MOVED ABOVE THE QUERIES 2026-08-07. These three used to be declared below
+     them, which was fine while nothing read them early — but the cold-load skip
+     gates need to know whether any PERSON has been rated, and reading them from a
+     useQuery above their declaration is a temporal-dead-zone crash, not a subtle
+     bug. Moving the declaration is safe: it depends only on `seed.current`, which
+     is built before any state, and the hook order stays unconditional. */
+  // Re-render when the cache lands. `COLD` may already be populated (module-scope
+  // fetch), in which case the very first render has it and there is no flash.
+  const [cold, setCold] = React.useState(COLD);
+  React.useEffect(() => { if (!cold) COLD_READY.then((d) => d && setCold(d)); }, []);
+  // The cache is used ONLY while the visitor has expressed nothing. One rating and
+  // the engine is authoritative — see `usingCold` below.
+  // NB: computed here from the four verdict lists rather than reusing `rated`,
+  // which is declared much further down — reading it here would be a temporal-dead-zone
+  // crash. All four lists are already in scope at this point by construction.
+  const ratedEarly = liked.length + disliked.length + likedPeople.length + dislikedPeople.length;
+  /* ⛔ TWO GATES, NOT ONE — and collapsing them back into one re-opens a broken page.
+     `coldOnly` decides whether to SKIP the queries. `usingCold` decides what to RENDER.
+     They are not the same moment: the instant a visitor rates something the queries must
+     start, but the engine still needs ~6s to boot and compile the model, and during that
+     window the live rows are empty. With a single gate the page dropped the cache
+     immediately and rendered "Nothing matches those filters" over an empty grid — a
+     visitor's first rating appeared to BREAK the site. So the cache keeps painting until
+     the engine has actually answered (`engineUp`), then hands over. */
+  const coldOnly = ratedEarly === 0 && !!cold;
+
   const seeds = useQuery({ query: "seed_titles", givens });
-  const recs = useQuery({ query: "recommendations", givens });
-  const recsPeople = useQuery({ query: "recommendations_by_person", givens });
+  const recs = useQuery({ query: "recommendations", givens, skip: liked.length === 0 });
+  const recsPeople = useQuery({ query: "recommendations_by_person", givens, skip: likedPeople.length === 0 });
   // The visitor's own subscriptions (CHARTER §7.3). Empty on a first visit,
   // which deliberately means "show every service" rather than "show none" --
   // an untouched control must not make a working site look empty.
@@ -132,27 +214,44 @@ export default function Dashboard({ dashboard, givens }) {
     });
   }, []);
 
-  const avail = useQuery({ query: "availability", givens });
+  const avail = useQuery({ query: "availability", givens, skip: coldOnly });
   // ⛑ WIRED 2026-08-05. This query existed in the model and NOTHING read it --
   // which is precisely Andrew's criticism: the page handed over a list with no
   // indication of how his ratings produced it.
-  const profileQ = useQuery({ query: "taste_profile", givens });
-  const detail = useQuery({ query: "availability_detail", givens });
-  const found = useQuery({ query: "search_titles", givens });
-  const people = useQuery({ query: "search_people", givens });
-  const seedPeople = useQuery({ query: "seed_people", givens });
-  const popular = useQuery({ query: "popular_picks", givens });
-  const vetoed = useQuery({ query: "titles_by_disliked_people", givens });
+  // The engine has answered at least once. `availability` is the right probe: every
+  // page state needs it, and it is never skipped once the visitor has rated.
+  const profileQ = useQuery({ query: "taste_profile", givens, skip: liked.length === 0 });
+  // Only the open detail modal reads this, so it must not run on load: it was
+  // fetching the full offer set for a title nobody had clicked yet.
+  const detail = useQuery({ query: "availability_detail", givens, skip: !open });
+  const found = useQuery({ query: "search_titles", givens, skip: q.trim().length < 2 });
+  const people = useQuery({ query: "search_people", givens, skip: q.trim().length < 2 });
+  /* ⛔ `seed_people` and `titles_by_person` WERE REMOVED HERE 2026-08-07 — they were
+     DEAD, not merely quiet. Both were declared and never referenced anywhere in this
+     file (verified by grep before removal, zero call sites), left behind when the
+     swipe deck moved to Watchpile and the rating controls moved to rate.jsx. They
+     still executed on every single page load. They are alive and used on rate.jsx,
+     which is where the person-rating path now lives — so this is a removal from the
+     page that stopped using them, not a deletion of the capability. */
+  const popular = useQuery({ query: "popular_picks", givens, skip: coldOnly });
+  const vetoed = useQuery({ query: "titles_by_disliked_people", givens, skip: dislikedPeople.length === 0 });
   // ⚑ THE INTERSECTION CATEGORIES — the point of the site (CHARTER §1 non-goals:
   // "upstream's genre-pairs browsing stays"). Genres arrive as a LIST per row and
   // are intersected in the UI; see shared_queries.malloy for why the query must not
   // do it with two conditions on one unnest.
-  const pairRows = useQuery({ query: "pair_titles", givens });
+  const pairRows = useQuery({ query: "pair_titles", givens, skip: coldOnly });
+  // ⛑ DECLARED HERE, AFTER ALL THREE QUERIES IT READS. Placing it right after
+  // `availability` put it above `popular_picks` and `pair_titles`, which is a
+  // temporal-dead-zone crash ("Cannot access before initialization") that took the
+  // whole page down — the cache made the page fast and then this made it blank.
+  const engineUp = ((avail.rows || []).length > 0)
+                || ((popular.rows || []).length > 0)
+                || ((pairRows.rows || []).length > 0);
+  const usingCold = !!cold && (ratedEarly === 0 || !engineUp);
   const genreOpts = useQuery({ query: "nw_genre_options", givens });
   const periodsQ = useQuery({ query: "nw_periods", givens });
   const gGenre = useGiven("GENRE");
   const gYear = useGiven("RELEASE_YEAR");
-  const personTitles = useQuery({ query: "titles_by_person", givens });
   const [person, setPerson] = React.useState("");
 
   const genreOptions = React.useMemo(
@@ -172,18 +271,6 @@ export default function Dashboard({ dashboard, givens }) {
     if (!m) return null;
     return { lo: +m[1], hi: +m[2] - 4 };
   }, [gYear.value]);
-  // Kept apart from title verdicts on purpose. A liked PERSON raises their
-  // weight in the profile; it never marks their filmography as liked.
-  const [peopleVerdicts, setPeopleVerdicts] = React.useState(() => seed.current.people);
-  const likedPeople = React.useMemo(
-    () => Object.keys(peopleVerdicts).filter((k) => peopleVerdicts[k] === "up"), [peopleVerdicts]);
-  // ⛔ A LEFT SWIPE ON A PERSON USED TO GO NOWHERE. Only the liked set was ever
-  // pushed into a given, so in the deck's DEFAULT mode half of every verdict the
-  // visitor gave was silently discarded — the counter did not move and the list
-  // did not change. CHARTER F5: "A disliked actor is a strong negative and
-  // should be treated as one."
-  const dislikedPeople = React.useMemo(
-    () => Object.keys(peopleVerdicts).filter((k) => peopleVerdicts[k] === "down"), [peopleVerdicts]);
   useDebouncedGiven(gLikedPeople, likedPeople);
   useDebouncedGiven(gDislikedPeople, dislikedPeople);
 
@@ -203,6 +290,15 @@ export default function Dashboard({ dashboard, givens }) {
   // one row per title now: logos are a pipe-joined string
   const offersFor = React.useMemo(() => {
     const m = {};
+    // Cached path: build_cold_start.sh already grouped services per title, so there
+    // is nothing to parse — the shape is the one StreamableMark expects.
+    if (usingCold) {
+      for (const r of (cold.offers || [])) {
+        const all = (r.services || []).filter(Boolean);
+        m[r.imdb_id] = { all, services: visibleServices(all, myServices), link: r.link || null };
+      }
+      return m;
+    }
     for (const r of avail.rows || []) {
       const all = parseProviders(r.provider_entries);
       m[r.imdb_id] = {
@@ -214,7 +310,7 @@ export default function Dashboard({ dashboard, givens }) {
       };
     }
     return m;
-  }, [avail.rows, myServices]);
+  }, [avail.rows, myServices, usingCold, cold]);
 
   // Pickable services, ordered by corpus coverage. Derived from the loaded rows
   // rather than hardcoded: TMDB renames and re-bundles providers regularly, and
@@ -222,11 +318,11 @@ export default function Dashboard({ dashboard, givens }) {
   // stale canary rank).
   const allServices = React.useMemo(() => {
     const count = new Map();
-    for (const r of avail.rows || [])
-      for (const p of parseProviders(r.provider_entries))
-        count.set(p.service, (count.get(p.service) || 0) + 1);
+    const bump = (name) => count.set(name, (count.get(name) || 0) + 1);
+    if (usingCold) for (const r of (cold.offers || [])) for (const p of (r.services || [])) bump(p.service);
+    else for (const r of avail.rows || []) for (const p of parseProviders(r.provider_entries)) bump(p.service);
     return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([sv]) => sv);
-  }, [avail.rows]);
+  }, [avail.rows, usingCold, cold]);
 
   // Seed pool, ROUND-ROBINED ACROSS GENRES. Taking the most-voted 48 gave a wall
   // of the same blockbusters -- and a tap on a film that shares its genres with
@@ -447,11 +543,17 @@ export default function Dashboard({ dashboard, givens }) {
     return m;
   }, [vetoed.rows]);
 
-  const pairSections = React.useMemo(() => pairs.map((p) => {
+  const pairSections = React.useMemo(() => usingCold
+    // Cached: the sections were computed at build time, already ordered by size and
+    // already sliced. Nothing to intersect at runtime.
+    ? (cold.crossovers || []).map((c) => ({ a: c.a, b: c.b, total: c.total, cold: true,
+                                            titles: c.titles || [] }))
+    : pairs.map((p) => {
     const inPair = titlesInPair(pairAll, p.a, p.b);
     const ordered = orderByCast(inPair, marksByTitle, likedPeople, dislikedPeople);
     return { ...p, total: inPair.length, titles: ordered.slice(0, 6) };
-  }).filter((s) => s.titles.length > 0), [pairs, pairAll, marksByTitle, likedPeople, dislikedPeople]);
+  }), [pairs, pairAll, marksByTitle, likedPeople, dislikedPeople, usingCold, cold])
+    .filter((s) => s.titles.length > 0);
 
   // One short line per tile saying why it is there. Built from figures the
   // scoring query ALREADY returns -- shared_crew / shared_cast / shared_genres
@@ -484,8 +586,8 @@ export default function Dashboard({ dashboard, givens }) {
   // not open as 60 films. With television removed (CHARTER §7.2) there is one
   // lane, and interleaving one lane is just a slower slice.
   const coldFallback = React.useMemo(
-    () => (popular.rows || []).slice(0, 60),
-    [popular.rows]);
+    () => (usingCold ? (cold.cold_list || []) : (popular.rows || [])).slice(0, 60),
+    [popular.rows, usingCold, cold]);
 
   // Three states, and each says which one it is. `personalised` is the only one
   // that may claim to be about you.
@@ -669,7 +771,7 @@ export default function Dashboard({ dashboard, givens }) {
               Genre crossovers
             </div>
             <span style={{ fontSize: 12, color: ink.muted }}>
-              {pairs[0] && pairs[0].cold
+              {usingCold || (pairs[0] && pairs[0].cold)
                 ? "the biggest intersections in the corpus — rate something and these reorder to your taste"
                 : "ordered by your taste: both genres liked ranks a pair up, a disliked genre pushes it down"}
             </span>

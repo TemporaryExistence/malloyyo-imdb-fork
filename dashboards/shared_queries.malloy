@@ -58,8 +58,16 @@ query: seed_titles is movies -> {
 // NOT avoid it — two conditions on one unnest IS the bug. It also honours CHARTER §2's
 // rule against unnests in a where-clause on `scoring`.
 #" Candidate titles carrying their full genre list, intersected in the UI
+// ⚑ THE LIMIT AND THE VOTE FLOOR ARE A LATENCY BUDGET, NOT A GUESS.
+// At `numVotes > 5000 / limit 4000` this query alone pushed time-to-first-poster
+// from 6.3s to 11.3s — measured, not estimated (scripts/_perf.cjs). Every row
+// carries a genre LIST, so it is the widest payload on the page.
+// 1200 well-known films still hold hundreds of titles in each top intersection
+// (Action+Adventure 617 at the old size), and the sections show six each. Cutting
+// it also makes the feature BETTER: the intersections fill with films people
+// recognise instead of the long tail.
 query: pair_titles is movies -> {
-  where: numVotes > 5000
+  where: numVotes > 25000
   group_by:
     tconst
     primary_title is primaryTitle
@@ -69,7 +77,7 @@ query: pair_titles is movies -> {
     genres
     poster is movie_image
   order_by: num_votes desc
-  limit: 4000
+  limit: 1200
 }
 
 // --- search (F6) ------------------------------------------------------------

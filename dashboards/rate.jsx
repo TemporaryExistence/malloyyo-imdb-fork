@@ -33,6 +33,22 @@ import { SearchBox } from "./lib/searchui.jsx";
 import { useTheme, num, TILE_W, Tile, GOOD, BAD } from "./lib/kit.jsx";
 import { useTaste } from "./lib/taste.js";
 
+/* ⚡ COLD-START CACHE — see scripts/build_cold_start.sh for the measurement that
+   motivated it. rate.html was 8.2s to its first poster for the same reason
+   next_watch was: ~5.5s of that is DuckDB-WASM booting and the model compiling
+   before any query runs.
+
+   ⛑ SIMPLER GATE THAN next_watch's, and deliberately so. next_watch needs two gates
+   because WHAT it shows changes once you rate. This page's seed pool is the SAME for
+   everyone — it is the pool you rate FROM — so there is nothing to switch: prefer the
+   live rows whenever they exist, otherwise paint the cache. No dependency on the
+   profile, so no circularity with useTaste (which derives `rated` from these rows). */
+let COLD = null;
+const COLD_READY = fetch(new URL("cold-start.json", document.baseURI))
+  .then((r) => (r.ok ? r.json() : null))
+  .then((d) => { COLD = Array.isArray(d) ? d[0] : d; return COLD; })
+  .catch(() => null);
+
 export default function Dashboard({ dashboard, givens }) {
   const { ink } = useTheme();
   const gLiked = useGiven("LIKED");
@@ -51,12 +67,20 @@ export default function Dashboard({ dashboard, givens }) {
   const people = useQuery({ query: "search_people", givens });
   const personTitles = useQuery({ query: "titles_by_person", givens });
 
+  const [cold, setCold] = React.useState(COLD);
+  React.useEffect(() => { if (!cold) COLD_READY.then((d) => d && setCold(d)); }, []);
+  // Live wins the moment it arrives; the cache only covers the boot window.
+  const seedRows = React.useMemo(
+    () => ((seeds.rows && seeds.rows.length) ? seeds.rows : ((cold && cold.seed_titles) || [])),
+    [seeds.rows, cold]);
+  const availLive = (avail.rows && avail.rows.length) ? avail.rows : null;
+
   const {
     verdicts, peopleVerdicts, skipped, history,
     liked, disliked, likedPeople, dislikedPeople, rated,
     rate, skip, ratePerson, undo, importCsv, importMsg,
   } = useTaste({ liked: gLiked, disliked: gDisliked, likedPeople: gLikedPeople, dislikedPeople: gDislikedPeople },
-               React.useMemo(() => (seeds.rows || []).map((r) => r.tconst), [seeds.rows]));
+               React.useMemo(() => seedRows.map((r) => r.tconst), [seedRows]));
 
   const [mode, setMode] = React.useState("grid");
   const [q, setQ] = React.useState("");
@@ -67,7 +91,15 @@ export default function Dashboard({ dashboard, givens }) {
   // one row per title now: logos are a pipe-joined string
   const offersFor = React.useMemo(() => {
     const m = {};
-    for (const r of avail.rows || []) {
+    if (!availLive) {
+      // Cached: build_cold_start.sh already grouped services per title.
+      for (const r of ((cold && cold.offers) || [])) {
+        const all = (r.services || []).filter(Boolean);
+        m[r.imdb_id] = { all, services: visibleServices(all, myServices), link: r.link || null };
+      }
+      return m;
+    }
+    for (const r of availLive) {
       const all = parseProviders(r.provider_entries);
       m[r.imdb_id] = {
         all,
@@ -78,7 +110,7 @@ export default function Dashboard({ dashboard, givens }) {
       };
     }
     return m;
-  }, [avail.rows, myServices]);
+  }, [availLive, cold, myServices]);
 
   // Pickable services, ordered by corpus coverage. Derived from the loaded rows
   // rather than hardcoded: TMDB renames and re-bundles providers regularly, and
@@ -86,11 +118,16 @@ export default function Dashboard({ dashboard, givens }) {
   // stale canary rank).
   const allServices = React.useMemo(() => {
     const count = new Map();
-    for (const r of avail.rows || [])
+    if (!availLive) {
+      for (const r of ((cold && cold.offers) || []))
+        for (const p of (r.services || [])) count.set(p.service, (count.get(p.service) || 0) + 1);
+      return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([sv]) => sv);
+    }
+    for (const r of availLive)
       for (const p of parseProviders(r.provider_entries))
         count.set(p.service, (count.get(p.service) || 0) + 1);
     return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([sv]) => sv);
-  }, [avail.rows]);
+  }, [availLive, cold]);
 
   // Seed pool, ROUND-ROBINED ACROSS GENRES. Taking the most-voted 48 gave a wall
   // of the same blockbusters -- and a tap on a film that shares its genres with
@@ -99,7 +136,7 @@ export default function Dashboard({ dashboard, givens }) {
   const pool = React.useMemo(() => {
     const byGenre = new Map();
     const seen = new Set();
-    for (const r of seeds.rows || []) {
+    for (const r of seedRows) {
       const g = r.genre || "Other";
       if (!byGenre.has(g)) byGenre.set(g, []);
       byGenre.get(g).push(r);
@@ -117,7 +154,7 @@ export default function Dashboard({ dashboard, givens }) {
       if (!progressed) break;
     }
     return out;
-  }, [seeds.rows]);
+  }, [seedRows]);
 
   const Chip = (props) => <ChipBase ink={ink} {...props} />;
 
