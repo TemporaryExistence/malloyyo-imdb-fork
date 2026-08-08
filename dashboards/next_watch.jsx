@@ -573,7 +573,13 @@ export default function Dashboard({ dashboard, givens }) {
         {dashboard.title}
       </h1>
       <p style={{ color: ink.muted, fontSize: 13.5, lineHeight: 1.45, margin: "0 0 20px" }}>
-        Rate a few things. Get a list, and where to watch it.
+        {/* ⛔ DO NOT put a rating instruction here. Andrew, 2026-08-07: "No user should ever
+            be GREETED with a 'rate what you've seen' tool. That is a total failure." This line
+            used to read "Rate a few things. Get a list, and where to watch it." — an instruction
+            to work before the visitor has been given anything. It also contradicted CHARTER §4:
+            the tool must produce a defensible list from ZERO input, and "the cold start is the
+            main path". Say what the page GIVES; the invitation to rate goes BELOW the list. */}
+        Films worth your time, and where to watch them.
       </p>
 
       {/* Tapping the SELECTED genre clears it. Upstream's picker has no clear
@@ -592,9 +598,16 @@ export default function Dashboard({ dashboard, givens }) {
           film is on it, and where to watch it. The genre picker and timeline stay here
           because they filter the RESULT — having them on both pages meant two identical-
           looking controls doing different things, which is the crowding Andrew named. */}
-      <div style={{ margin: "0 0 18px", fontSize: 13, color: ink.muted }}>
-        Rated {rated} so far. <a href="./rate.html" style={{ color: ink.accent }}>Rate more films</a> to sharpen this list.
-      </div>
+      {/* ⛔ GATED ON rated > 0 ON PURPOSE (2026-08-07). Unconditional, this rendered
+          "Rated 0 so far. Rate more films to sharpen this list." ABOVE the list — a second
+          rating demand before the visitor had seen a single film. A cold visitor is never
+          asked for work here; the route to rate.html sits BELOW the list instead, where it
+          reads as an offer to improve something they already have. */}
+      {rated > 0 && (
+        <div style={{ margin: "0 0 18px", fontSize: 13, color: ink.muted }}>
+          Rated {rated} so far. <a href="./rate.html" style={{ color: ink.accent }}>Rate more films</a> to sharpen this list.
+        </div>
+      )}
 
 
       {/* ------------------------------ the list ------------------------- */}
@@ -670,6 +683,17 @@ export default function Dashboard({ dashboard, givens }) {
           <div style={{ fontSize: 12.5, color: ink.muted }}>Nothing matches those filters.</div>
         )}
       </div>
+
+      {/* THE COLD VISITOR'S ONLY RATING PROMPT, AND IT IS BELOW THE LIST BY DESIGN.
+          They have already been given 28 films and where to watch them, so this reads as
+          "make it yours", not "do some work first". Removing the gate above without adding
+          this would have left a cold visitor no route to rate.html at all — the fix for a
+          greeting-nag must not become a dead end. */}
+      {rated === 0 && list.length > 0 && (
+        <div style={{ margin: "0 0 26px", fontSize: 13, color: ink.muted }}>
+          This is the general list. <a href="./rate.html" style={{ color: ink.accent }}>Rate a few films</a> and it becomes yours.
+        </div>
+      )}
 
       {open && (
         <div onClick={() => setOpen(null)}

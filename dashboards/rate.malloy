@@ -26,7 +26,12 @@ given:
 // A first draft of this page defined its own `rate_seed` with the same shape;
 // that is exactly the duplication the split is supposed to avoid, so it was
 // deleted once the import mechanism was proven to work.
-# artifact { title="Rate what you've seen" givens { GENRE="" RELEASE_YEAR="" } }
+// ⛔ THIS TITLE IS ALSO THE SITE-NAV LABEL ON EVERY PAGE — keep it a NOUN, never an instruction.
+// It read "Rate what you've seen" until 2026-08-07, so every visitor of every page was greeted by a
+// nav item telling them to go do data entry. Andrew: "No user should ever be GREETED with a 'rate
+// what you've seen' tool. That is a total failure." Lloyd's own pages name things ("Genre pairs",
+// "Works together"); a destination, not a chore. Match that idiom if this is ever renamed.
+# artifact { title="Your taste" givens { GENRE="" RELEASE_YEAR="" } }
 # dashboard
 #" Well-known films to react to
 query: rate_page is seed_titles

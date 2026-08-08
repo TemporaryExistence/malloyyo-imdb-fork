@@ -925,6 +925,51 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     await sk.close();
   }
 
+  // ⛔ THE GREETING RULE. Andrew, 2026-08-07: "No user should ever be GREETED with a
+  // 'rate what you've seen' tool. That is a total failure." The suite had 59 checks and
+  // NONE of them looked at what a cold visitor is asked to do before they are given
+  // anything — so three separate rating demands shipped: the site-nav label (rate.malloy's
+  // artifact title, on EVERY page), next_watch's subtitle ("Rate a few things..."), and a
+  // "Rated 0 so far" counter above the list. This is the missing check, not a new feature.
+  // It is also CHARTER §4 stated as an assertion: a list from ZERO input is the main path.
+  console.log("\n[6g] a cold visitor is GIVEN something before being asked for anything");
+  {
+    const p = await cleanPage(b, { width: 1440, height: 900 });
+    await p.goto(BASE + "/next_watch.html", { waitUntil: "domcontentloaded", timeout: 120000 });
+    await p.waitForTimeout(18000);
+    const g = await p.evaluate(() => {
+      const tile = document.querySelector('div[aria-label^="Open "]');
+      const tileTop = tile ? tile.getBoundingClientRect().top + window.scrollY : null;
+      const above = [];
+      const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        const t = (n.textContent || "").trim();
+        if (!t) continue;
+        const el = n.parentElement; if (!el) continue;
+        const b2 = el.getBoundingClientRect();
+        if (b2.width === 0 && b2.height === 0) continue;
+        if (tileTop == null || b2.top + window.scrollY < tileTop) above.push(t);
+      }
+      return { tiles: document.querySelectorAll('div[aria-label^="Open "]').length,
+               above, body: document.body.innerText };
+    });
+    if (!g.tiles) note("cold-greeting", "a cold visitor gets NO list at all (CHARTER §4)");
+    else ok(`a cold visitor gets a list without doing anything (${g.tiles} tiles)`);
+    // Deliberately IMPERATIVES only, not every string containing "rate": the list's own
+    // caption ("top rated, until you rate something") DESCRIBES state and is honest. A
+    // match-everything rule would push a future edit to delete a truthful label to go green.
+    const nag = g.above.filter((t) => /^\s*(rate|tap what|tell (us|it)|pick what)\b/i.test(t));
+    if (nag.length) note("cold-greeting", `rating instruction ABOVE the first film: ${JSON.stringify(nag.slice(0, 3))}`);
+    else ok("nothing above the first film asks the visitor to rate");
+    if (/Rated 0 so far/i.test(g.body)) note("cold-greeting", '"Rated 0 so far" shown to someone who rated nothing');
+    else ok('no "Rated 0 so far" counter for a cold visitor');
+    // ...and the fix must not become a dead end.
+    if (!(await p.locator('a[href="./rate.html"]').count()))
+      note("cold-greeting", "no route to rate.html at all — the greeting fix became a dead end");
+    else ok("the rating route still exists, below the list");
+    await p.close();
+  }
+
   console.log("\n[7] internal links resolve");
   const p = await cleanPage(b, { width: 1440, height: 1000 });
   await p.goto(BASE + "/index.html", { waitUntil: "networkidle", timeout: 90000 });
