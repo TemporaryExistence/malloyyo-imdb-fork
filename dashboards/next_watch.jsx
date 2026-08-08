@@ -18,7 +18,8 @@ import { filters, useGiven, useQuery } from "@malloyyo/dashboard";
 import { parseProviders, visibleServices, serviceLink, canonicalService, loadMyServices, saveMyServices } from "./lib/streaming.js";
 import { LOGO, ChipBase, StreamableMark, ServicePicker } from "./lib/streamui.jsx";
 import { SearchBox } from "./lib/searchui.jsx";
-import { loadProfile, saveProfile, profileIsEmpty } from "./lib/profile.js";
+import { loadProfile, saveProfile, profileIsEmpty,
+         genreCounts, rankGenrePairs, topPairsByCorpus, titlesInPair, orderByCast } from "./lib/profile.js";
 
 import { INK, GOOD, BAD, useTheme, num, compact, GenrePicker, periodLabel, Timeline, TILE_W, Availability, Tile, CopyButton, Badge } from "./lib/kit.jsx";
 
@@ -142,6 +143,11 @@ export default function Dashboard({ dashboard, givens }) {
   const seedPeople = useQuery({ query: "seed_people", givens });
   const popular = useQuery({ query: "popular_picks", givens });
   const vetoed = useQuery({ query: "titles_by_disliked_people", givens });
+  // ⚑ THE INTERSECTION CATEGORIES — the point of the site (CHARTER §1 non-goals:
+  // "upstream's genre-pairs browsing stays"). Genres arrive as a LIST per row and
+  // are intersected in the UI; see shared_queries.malloy for why the query must not
+  // do it with two conditions on one unnest.
+  const pairRows = useQuery({ query: "pair_titles", givens });
   const genreOpts = useQuery({ query: "nw_genre_options", givens });
   const periodsQ = useQuery({ query: "nw_periods", givens });
   const gGenre = useGiven("GENRE");
@@ -419,6 +425,34 @@ export default function Dashboard({ dashboard, givens }) {
   // "nothing rated yet" after several deliberate swipes.
   const rated = liked.length + disliked.length + likedPeople.length + dislikedPeople.length;
 
+  /* ── genre INTERSECTION categories ────────────────────────────────────────
+     Ordered by the profile once there is one; by the CORPUS before that, so the
+     feature is on screen for a visitor who has done nothing. That cold path is
+     load-bearing twice over: it is the only way the site's point survives first
+     contact, and it is what keeps this from becoming another "do work first"
+     surface (greeting rule, stress [6g]). */
+  const pairAll = pairRows.rows || [];
+  const pairs = React.useMemo(() => {
+    const likedCounts = genreCounts(pairAll, liked);
+    const dislikedCounts = genreCounts(pairAll, disliked);
+    const byProfile = rankGenrePairs(likedCounts, dislikedCounts).slice(0, 6);
+    return byProfile.length ? byProfile : topPairsByCorpus(pairAll, 6);
+  }, [pairAll, liked, disliked]);
+
+  // Person marks per title, so a pair's films sort by liked cast and drop vetoed
+  // ones. Reuses the rows already fetched rather than a second query.
+  const marksByTitle = React.useMemo(() => {
+    const m = {};
+    for (const r of (vetoed.rows || [])) (m[r.tconst] ||= []).push(r.feature);
+    return m;
+  }, [vetoed.rows]);
+
+  const pairSections = React.useMemo(() => pairs.map((p) => {
+    const inPair = titlesInPair(pairAll, p.a, p.b);
+    const ordered = orderByCast(inPair, marksByTitle, likedPeople, dislikedPeople);
+    return { ...p, total: inPair.length, titles: ordered.slice(0, 6) };
+  }).filter((s) => s.titles.length > 0), [pairs, pairAll, marksByTitle, likedPeople, dislikedPeople]);
+
   // One short line per tile saying why it is there. Built from figures the
   // scoring query ALREADY returns -- shared_crew / shared_cast / shared_genres
   // -- so it costs no extra query and cannot drift from the ranking it explains.
@@ -610,6 +644,63 @@ export default function Dashboard({ dashboard, givens }) {
       )}
 
 
+      {/* ⛑ MOVED ABOVE THE CROSSOVERS 2026-08-07. It used to sit down with the flat
+          list, on the reasoning that it governs the marks on THOSE tiles and the top
+          of the page was already crowded. Once the intersection sections went in
+          above the list, that put the control below five sections of posters that
+          ALSO carry the mark — so the thing it configures appeared long before it
+          did. It had already been found buried once (2026-08-05 audit); this is the
+          same defect returning through a layout change. It is now ONE button rather
+          than a chip row, so being near the top costs almost no vertical space. */}
+      <ServicePicker ink={ink} all={allServices} mine={myServices} onToggle={toggleService} />
+
+      {/* ─────────────── genre INTERSECTION categories — THE POINT ───────────
+          Andrew, 2026-08-07: "THE ENTIRE POINT IS GENRE INTERSECTION CATEGORIES TO
+          DISPLAY THE POWER OF MALLOY." Placed ABOVE the flat list deliberately: the
+          list is the answer, the intersections are what makes the answer look like
+          something only this stack does. Reducing the page to a ranked list is what
+          lost it. Each section shows the pair, how many films sit in BOTH genres in
+          the corpus, and the top titles from that intersection. */}
+      {pairSections.length > 0 && (
+        <div style={{ margin: "0 0 30px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase",
+                          color: ink.muted, fontWeight: 700 }}>
+              Genre crossovers
+            </div>
+            <span style={{ fontSize: 12, color: ink.muted }}>
+              {pairs[0] && pairs[0].cold
+                ? "the biggest intersections in the corpus — rate something and these reorder to your taste"
+                : "ordered by your taste: both genres liked ranks a pair up, a disliked genre pushes it down"}
+            </span>
+          </div>
+
+          {pairSections.map((s) => (
+            <div key={s.a + "|" + s.b} style={{ margin: "0 0 20px" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 7, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 14.5, fontWeight: 680, color: ink.text }}>
+                  {s.a} <span style={{ color: ink.muted, fontWeight: 500 }}>+</span> {s.b}
+                </span>
+                {/* The count is the demonstration: it is a genuine set intersection
+                    over the whole corpus, not a filter on one genre. */}
+                <span style={{ fontSize: 11.5, color: ink.muted }}>
+                  {compact(s.total)} film{s.total === 1 ? "" : "s"} in both
+                </span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, ${TILE_W}px)`, gap: 14 }}>
+                {s.titles.map((r) => (
+                  <Tile key={r.tconst} ink={ink} row={r} offers={offersFor[r.tconst]}
+                        reason={r.liked_cast > 0
+                          ? `${r.liked_cast} of your ${r.liked_cast === 1 ? "person" : "people"}`
+                          : null}
+                        onOpen={() => { setOpen(r); gDetail.set(filters.oneOf(r.tconst)); }} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ------------------------------ the list ------------------------- */}
       <div style={{ margin: "0 0 26px" }}>
         {/* ⛑ WHY THIS LIST. Andrew, 2026-08-05: it "needs to be immediately
@@ -645,10 +736,6 @@ export default function Dashboard({ dashboard, givens }) {
             </div>
           </div>
         )}
-        {/* Placed with the list rather than up with the filters on purpose: it
-            governs what the marks ON THESE TILES say, and the top of the page
-            already carries more controls than it should (CHARTER §7.3). */}
-        <ServicePicker ink={ink} all={allServices} mine={myServices} onToggle={toggleService} />
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
           <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: ink.muted, fontWeight: 700 }}>
             Your next watch

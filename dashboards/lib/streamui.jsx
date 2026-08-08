@@ -25,13 +25,22 @@ export function ChipBase({ ink, on, onClick, children }) {
 
 // A glyph, not the word "Streamable". Andrew asked for an icon specifically --
 // the word repeated across a grid is the same crowding in another font.
-export function StreamGlyph({ size = 16, color }) {
+//
+// ⛔ IT MUST NOT TAKE ITS COLOUR FROM THE THEME'S TEXT INK. It used to:
+// `fill="rgba(255,255,255,.92)"` for the screen with the play triangle drawn in
+// `ink.text`. In DARK MODE ink.text is near-white, so a white triangle sat on a
+// white screen and the whole thing read as "just a blank white box" -- Andrew's
+// words, 2026-08-07. A mark whose legibility depends on the theme is not a mark.
+// So the contrast pair is FIXED here: a solid dark screen with a WHITE play
+// triangle, plus a light ring so it also separates from a dark poster. It is the
+// same two colours in both themes, on top of arbitrary poster art, by design.
+export function StreamGlyph({ size = 18 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true" focusable="false"
+    <svg width={size} height={size} viewBox="0 0 18 18" aria-hidden="true" focusable="false"
          style={{ display: "block" }}>
-      <rect x="0.75" y="2.25" width="14.5" height="11.5" rx="2.25"
-            fill="rgba(255,255,255,.92)" stroke={color} strokeWidth="1.2" />
-      <path d="M6.4 5.6 L11 8 L6.4 10.4 Z" fill={color} />
+      <rect x="0.6" y="0.6" width="16.8" height="16.8" rx="4.2"
+            fill="#111827" stroke="rgba(255,255,255,.92)" strokeWidth="1.2" />
+      <path d="M7 5.4 L12.6 9 L7 12.6 Z" fill="#ffffff" />
     </svg>
   );
 }
@@ -61,7 +70,7 @@ export function StreamableMark({ ink, offers, title, year, size = 16 }) {
               onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
               style={{ border: 0, padding: 0, background: "transparent", cursor: "pointer", lineHeight: 0,
                        borderRadius: 4, boxShadow: "0 0 0 1px rgba(0,0,0,.35)" }}>
-        <StreamGlyph size={size} color={ink.text} />
+        <StreamGlyph size={size} />
         {/* ⛔ THE LICENCE TERM MUST NOT BE HOVER-ONLY. TMDB requires the
             JustWatch credit on EACH media item, and the previous design carried
             it in the alt text of a visible logo. Collapsing to one glyph put the
@@ -105,39 +114,112 @@ export function StreamableMark({ ink, offers, title, year, size = 16 }) {
  * have access to." Everything the mark does depends on this, so it is a control
  * on the page rather than a settings screen nobody opens.
  */
+/**
+ * ⚑ SUBSCRIBER POPULARITY, NOT CORPUS COVERAGE.
+ *
+ * `all` arrives ordered by how much of the CORPUS each service carries, which is a
+ * different question from "which services do people actually have". Ordering the
+ * menu by corpus share puts a niche channel with a deep back-catalogue above
+ * Netflix. Andrew asked for "ordered by most popular subscription services", so the
+ * majors lead in real subscriber order and everything else keeps its corpus order
+ * behind them. Hardcoded on purpose: there is no subscriber-count column in the
+ * data, and inventing one from corpus share would be the same mistake with a number
+ * attached to make it look derived.
+ */
+const BY_SUBSCRIBERS = [
+  "Netflix", "Amazon Prime Video", "Prime Video", "Disney Plus", "Disney+",
+  "Max", "HBO Max", "Hulu", "Paramount Plus", "Paramount+",
+  "Apple TV+", "Apple TV Plus", "Peacock", "Peacock Premium",
+];
+
+function bySubscriberPopularity(all) {
+  const rank = new Map();
+  BY_SUBSCRIBERS.forEach((n, i) => rank.set(n.toLowerCase(), i));
+  return [...all].sort((a, b) => {
+    const ra = rank.has(a.toLowerCase()) ? rank.get(a.toLowerCase()) : Infinity;
+    const rb = rank.has(b.toLowerCase()) ? rank.get(b.toLowerCase()) : Infinity;
+    if (ra !== rb) return ra - rb;
+    return all.indexOf(a) - all.indexOf(b);   // stable: keep corpus order for the tail
+  });
+}
+
+/**
+ * Andrew: "make an option for users to select which streaming platforms they
+ * have access to." Everything the mark does depends on this, so it is a control
+ * on the page rather than a settings screen nobody opens.
+ *
+ * ⛔ ONE VISIBLE BUTTON THAT OPENS A MENU — not a chip row. Andrew, 2026-08-07:
+ * "should be a single button that is more visible that pops up a menu for people to
+ * click which subscriptions they have". The old form spilled 14 chips inline, which
+ * was both easy to scroll past (it had already been found buried once) and part of
+ * the crowding CHARTER §7.3 exists to remove. A closed control that states what it
+ * is for is more visible than fourteen open ones.
+ */
 export function ServicePicker({ ink, all, mine, onToggle }) {
   const [open, setOpen] = React.useState(false);
-  // Ordered by how much of the corpus each service carries, so the ones worth
-  // picking are the ones on screen. The long tail (190-odd niche channels) sits
-  // behind "more" rather than in front of everyone -- showing all of them would
-  // be the crowding this feature exists to remove.
-  const top = all.slice(0, 14);
-  const rest = all.slice(14);
-  const shown = open ? all : top;
+  const ordered = React.useMemo(() => bySubscriberPopularity(all || []), [all]);
   const chosen = new Set(mine);
+  const ref = React.useRef(null);
+
+  // Click-away and Escape. A menu with no way out but a second precise click is a
+  // trap on touch, where there is no "click somewhere harmless".
+  React.useEffect(() => {
+    if (!open) return;
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc); };
+  }, [open]);
+
+  const label = chosen.size
+    ? `Your services · ${chosen.size} selected`
+    : "What do you subscribe to?";
+
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase",
-                    color: ink.muted, fontWeight: 700, marginBottom: 7 }}>
-        What do you subscribe to?
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
-        {shown.map((sv) => (
-          <ChipBase key={sv} ink={ink} on={chosen.has(sv)} onClick={() => onToggle(sv)}>{sv}</ChipBase>
-        ))}
-        {!open && rest.length > 0 && (
-          <button type="button" onClick={() => setOpen(true)}
-                  style={{ font: "inherit", fontSize: 12, cursor: "pointer", background: "transparent",
-                           border: 0, color: ink.accent, padding: "0 4px" }}>
-            {rest.length} more
-          </button>
-        )}
-      </div>
-      <div style={{ fontSize: 11.5, color: ink.muted, marginTop: 6 }}>
-        {chosen.size
-          ? "Titles you cannot stream lose the mark."
-          : "Pick yours and the mark only shows what you can watch."}
-      </div>
+    <div ref={ref} style={{ position: "relative", marginBottom: 14 }}>
+      <button type="button" onClick={() => setOpen((v) => !v)}
+              aria-expanded={open} aria-haspopup="true"
+              style={{ font: "inherit", fontSize: 13.5, fontWeight: 600, cursor: "pointer",
+                       display: "inline-flex", alignItems: "center", gap: 9,
+                       padding: "9px 14px", borderRadius: 9,
+                       background: chosen.size ? ink.accent : ink.surface,
+                       color: chosen.size ? "#fff" : ink.text,
+                       border: `1px solid ${chosen.size ? ink.accent : ink.text2}` }}>
+        <StreamGlyph size={16} />
+        {label}
+        <span aria-hidden="true" style={{ fontSize: 10, opacity: .8 }}>{open ? "▲" : "▼"}</span>
+      </button>
+
+      {!chosen.size && (
+        <span style={{ fontSize: 11.5, color: ink.muted, marginLeft: 10 }}>
+          so the mark only shows what you can watch
+        </span>
+      )}
+
+      {open && (
+        <div role="menu"
+             style={{ position: "absolute", left: 0, top: "calc(100% + 6px)", zIndex: 60,
+                      background: ink.surface, border: `1px solid ${ink.track}`, borderRadius: 10,
+                      boxShadow: "0 10px 28px rgba(0,0,0,.22)", padding: 10,
+                      maxHeight: 340, overflowY: "auto", minWidth: 260, maxWidth: 420 }}>
+          <div style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase",
+                        color: ink.muted, fontWeight: 700, marginBottom: 8 }}>
+            Tick everything you have
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+            {ordered.map((sv) => (
+              <ChipBase key={sv} ink={ink} on={chosen.has(sv)} onClick={() => onToggle(sv)}>{sv}</ChipBase>
+            ))}
+          </div>
+          <div style={{ fontSize: 11.5, color: ink.muted, marginTop: 9,
+                        borderTop: `1px solid ${ink.track}`, paddingTop: 8 }}>
+            {chosen.size
+              ? "Titles you cannot stream lose the mark."
+              : "Most popular services first."}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

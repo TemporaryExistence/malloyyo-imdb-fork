@@ -43,6 +43,35 @@ query: seed_titles is movies -> {
   limit: 400
 }
 
+// --- genre INTERSECTION categories -------------------------------------------
+// ⚑ THIS IS THE POINT OF THE SITE. Andrew, 2026-08-07: "THE ENTIRE POINT IS GENRE
+// INTERSECTION CATEGORIES TO DISPLAY THE POWER OF MALLOY." Upstream's whole tool is
+// "what pairs with Comedy?", and CHARTER §1 non-goals say upstream's genre-pairs
+// browsing STAYS. next_watch had reduced to a flat ranked list, which loses it.
+//
+// ⛔ GENRES TRAVEL OUT AS A LIST AND ARE INTERSECTED IN THE UI — never
+//   `where: genres.value ~ $A and genres.value ~ $B`.
+// That form puts TWO conditions on the SAME unnest and no single element is both
+// "Crime" and "Drama", so it returns ZERO rows against a corpus holding 2,265
+// Crime+Drama films. That exact bug shipped once and rendered six empty categories
+// that blamed the visitor's disliked actors. Splitting the pair into two givens does
+// NOT avoid it — two conditions on one unnest IS the bug. It also honours CHARTER §2's
+// rule against unnests in a where-clause on `scoring`.
+#" Candidate titles carrying their full genre list, intersected in the UI
+query: pair_titles is movies -> {
+  where: numVotes > 5000
+  group_by:
+    tconst
+    primary_title is primaryTitle
+    start_year is startYear
+    average_rating is averageRating
+    num_votes is numVotes
+    genres
+    poster is movie_image
+  order_by: num_votes desc
+  limit: 4000
+}
+
 // --- search (F6) ------------------------------------------------------------
 #" Find a specific title to rate
 query: search_titles is movies -> {
