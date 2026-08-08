@@ -209,3 +209,29 @@ query: popular_picks is movies -> {
   order_by: average_rating desc
   limit: 60
 }
+
+// ⚑ THE INTERSECTION CANDIDATES — page-local so they can be FILTERED (2026-08-08).
+// Andrew: "I selected 1970-1975 and the movies shown didn't change." They did not change
+// because this query could not see the timeline at all.
+// ⛔ Genres still travel out as a LIST and are intersected in the UI. Never
+// `where: genres.value ~ $A and genres.value ~ $B` — two conditions on one unnest match
+// nothing and once rendered six empty categories blaming the visitor's disliked actors.
+query: pair_titles is movies -> {
+  // ⛔ NO `genres.value ~ $GENRE` HERE. That unnests the genre list in the WHERE while the
+  // SELECT groups by the whole list — the same unnest-in-a-where-clause trap CHARTER §2
+  // warns about and the reason the crossovers once returned nothing at all. startYear is a
+  // plain scalar, so the YEAR filter is safe in the query; the genre restriction is applied
+  // in the UI over the returned list, where the intersection already happens anyway.
+  where: numVotes > 25000
+     and startYear ~ $RELEASE_YEAR
+  group_by:
+    tconst
+    primary_title is primaryTitle
+    start_year is startYear
+    average_rating is averageRating
+    num_votes is numVotes
+    genres
+    poster is movie_image
+  order_by: num_votes desc
+  limit: 1200
+}

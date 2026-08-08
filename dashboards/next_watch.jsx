@@ -18,7 +18,7 @@ import { filters, useGiven, useQuery } from "@malloyyo/dashboard";
 import { parseProviders, visibleServices, serviceLink, canonicalService, loadMyServices, saveMyServices } from "./lib/streaming.js";
 import { LOGO, ChipBase, StreamableMark, ServicePicker } from "./lib/streamui.jsx";
 import { SearchBox } from "./lib/searchui.jsx";
-import { loadProfile, saveProfile, profileIsEmpty,
+import { loadProfile, saveProfile, profileIsEmpty, genresOf,
          genreCounts, rankGenrePairs, topPairsByCorpus, titlesInPair, orderByCast } from "./lib/profile.js";
 
 import { INK, GOOD, BAD, useTheme, num, compact, GenrePicker, periodLabel, Timeline, TILE_W, Availability, Tile, CopyButton, Badge } from "./lib/kit.jsx";
@@ -60,6 +60,22 @@ const COLD_READY = fetch(new URL("cold-start.json", document.baseURI))
    this one share ONE definition. Splitting the page in two while leaving two
    copies of the poster tile would have re-created the crowding the split exists
    to remove, one drift at a time. */
+
+/* ⛔ THE TIMELINE'S FILTER FORM — `>= lo and <= hi`, NOT `filters.between(lo, hi)`.
+   This is the bug behind Andrew's 2026-08-08 report ("I selected 1970-1975 and the movies
+   shown didn't change"). `filters.between` writes `1970 to 1979`, and MEASURED against the
+   live page, every query reading $RELEASE_YEAR returns ZERO rows for that form:
+
+     given                    tiles   years shown
+     "2000 to 2009"             0     —            <- what the timeline used to write
+     ">= 2000 and <= 2009"     64     2000-2009
+     ">= 1970 and <= 1979"     64     1970-1979
+
+   So a year selection emptied the recommendation list outright, and the crossovers (which
+   could not see the given at all) went on showing 2019 films underneath — which is exactly
+   the "nothing changed" the user saw. The `to` range is not rejected loudly; it simply
+   matches nothing, which is why this survived a 59-check suite. */
+function yearFilter(lo, hi) { return `>= ${lo} and <= ${hi}`; }
 
 export default function Dashboard({ dashboard, givens }) {
   const { ink } = useTheme();
@@ -188,6 +204,14 @@ export default function Dashboard({ dashboard, givens }) {
   // NB: computed here from the four verdict lists rather than reusing `rated`,
   // which is declared much further down — reading it here would be a temporal-dead-zone
   // crash. All four lists are already in scope at this point by construction.
+  // ⛑ DECLARED HERE so the cold gate below can see them. The genre picker and the
+  // timeline are FILTERS on the output, and the cold cache is a fixed, unfiltered page —
+  // it cannot answer "only 1970–1975". Andrew, 2026-08-08: "I selected 1970-1975 and the
+  // movies shown didn't change, even though I know many or all of the ones I am seeing
+  // came out after 2000." The cache was silently ignoring both filters.
+  const gGenre = useGiven("GENRE");
+  const gYear = useGiven("RELEASE_YEAR");
+
   const ratedEarly = liked.length + disliked.length + likedPeople.length + dislikedPeople.length;
   /* ⛔ TWO GATES, NOT ONE — and collapsing them back into one re-opens a broken page.
      `coldOnly` decides whether to SKIP the queries. `usingCold` decides what to RENDER.
@@ -197,7 +221,14 @@ export default function Dashboard({ dashboard, givens }) {
      immediately and rendered "Nothing matches those filters" over an empty grid — a
      visitor's first rating appeared to BREAK the site. So the cache keeps painting until
      the engine has actually answered (`engineUp`), then hands over. */
-  const coldOnly = ratedEarly === 0 && !!cold;
+  /* ⛔ ANY FILTER DROPS OUT OF THE CACHE. This is exactly the trade Andrew asked for:
+     "a clean homepage with no user data loads instantly ... then as users input specifics,
+     actual queries have to happen, and it gets a little slower, but that's fine." Selecting
+     a genre or a year range IS inputting specifics. Serving the cache through a filter does
+     not merely fail to speed things up — it shows the visitor a page that ignores what they
+     just asked for, which is worse than being slow. */
+  const filterActive = !!String(gGenre.value || "") || !!String(gYear.value || "");
+  const coldOnly = ratedEarly === 0 && !filterActive && !!cold;
 
   const seeds = useQuery({ query: "seed_titles", givens });
   const recs = useQuery({ query: "recommendations", givens, skip: liked.length === 0 });
@@ -247,11 +278,9 @@ export default function Dashboard({ dashboard, givens }) {
   const engineUp = ((avail.rows || []).length > 0)
                 || ((popular.rows || []).length > 0)
                 || ((pairRows.rows || []).length > 0);
-  const usingCold = !!cold && (ratedEarly === 0 || !engineUp);
+  const usingCold = !!cold && !filterActive && (ratedEarly === 0 || !engineUp);
   const genreOpts = useQuery({ query: "nw_genre_options", givens });
   const periodsQ = useQuery({ query: "nw_periods", givens });
-  const gGenre = useGiven("GENRE");
-  const gYear = useGiven("RELEASE_YEAR");
   const [person, setPerson] = React.useState("");
 
   const genreOptions = React.useMemo(
@@ -267,6 +296,10 @@ export default function Dashboard({ dashboard, givens }) {
   }, [gGenre.value]);
   const yearRange = React.useMemo(() => {
     const src = String(gYear.value || "");
+    // Current form first, then the legacy `to` form so a link shared before 2026-08-08
+    // still resolves to the right selection instead of silently reading as "all time".
+    const m2 = src.match(/>=\s*(\d{4})\s+and\s+<=\s*(\d{4})/);
+    if (m2) return { lo: +m2[1], hi: +m2[2] - 4 };
     const m = src.match(/(\d{4})\s*to\s*(\d{4})/);
     if (!m) return null;
     return { lo: +m[1], hi: +m[2] - 4 };
@@ -527,7 +560,23 @@ export default function Dashboard({ dashboard, givens }) {
      load-bearing twice over: it is the only way the site's point survives first
      contact, and it is what keeps this from becoming another "do work first"
      surface (greeting rule, stress [6g]). */
-  const pairAll = pairRows.rows || [];
+  /* ⛑ FILTERING MOVED INTO THE QUERY 2026-08-08. `pair_titles` is now page-local
+     (next_watch.malloy) and applies $RELEASE_YEAR and $GENRE in the database, so these
+     rows arrive already restricted to the visitor's selection.
+     ⛔ The client-side version this replaces was not merely redundant, it was WRONG: it
+     filtered the globally top-1,200-by-votes rows, so selecting the 1970s left the
+     crossovers empty — almost no 1970s film clears a global vote cut. Filtering first and
+     taking the top 1,200 WITHIN the selection is a different query, not the same one
+     reordered. */
+  /* The YEAR filter is applied in the query (page-local `pair_titles`), so these rows
+     already respect the timeline — which is what fixes "the movies shown didn't change".
+     ⛔ GENRE stays in the UI: putting `genres.value ~ $GENRE` in the query unnests the list
+     in the WHERE while the SELECT groups by the whole list, which is the trap that made the
+     crossovers return nothing. Filtering here costs one pass over rows we already hold. */
+  const pairAll = React.useMemo(() => {
+    const rows = pairRows.rows || [];
+    return genreNow ? rows.filter((r) => genresOf(r).includes(genreNow)) : rows;
+  }, [pairRows.rows, genreNow]);
   const pairs = React.useMemo(() => {
     const likedCounts = genreCounts(pairAll, liked);
     const dislikedCounts = genreCounts(pairAll, disliked);
@@ -727,7 +776,7 @@ export default function Dashboard({ dashboard, givens }) {
       <GenrePicker ink={ink} options={genreOptions} current={genreNow}
                    onPick={(g) => gGenre.set(!g || g === genreNow ? "" : filters.oneOf(g))} />
       <Timeline ink={ink} periods={periods} range={yearRange}
-                onSelect={(lo, hi) => gYear.set(lo == null ? "" : filters.between(lo, (hi ?? lo) + 4))} />
+                onSelect={(lo, hi) => gYear.set(lo == null ? "" : yearFilter(lo, (hi ?? lo) + 4))} />
 
       {/* The RATING controls (mode chips, poster grid, search, IMDb import) moved to
           rate.jsx on 2026-08-07. This page's one job is the OUTPUT: the list, why each

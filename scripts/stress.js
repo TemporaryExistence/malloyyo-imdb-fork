@@ -1052,6 +1052,49 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     await q.close();
   }
 
+  // ⛔ THE TIMELINE ACTUALLY FILTERS. Andrew, 2026-08-08: "I selected 1970-1975 and the
+  // movies shown didn't change, even though I know many or all of the ones I am seeing came
+  // out after 2000." The whole feature was dead and 59 checks did not notice, because every
+  // one of them looked at an UNFILTERED page.
+  // Root cause, measured: the Timeline wrote filters.between(lo, hi) -> "1970 to 1979", and
+  // every query reading $RELEASE_YEAR returns ZERO rows for that form. It is not rejected
+  // loudly; it silently matches nothing. So the list emptied while the crossovers - which
+  // could not see the given at all - kept showing 2019 films above it.
+  // ⚑ ASSERTED BY YEAR, NOT BY "the list changed". A list that changes but still shows 2019
+  // films would pass a shallow check and fail the user in exactly the reported way.
+  console.log("\n[6i] a year selection actually restricts the films shown");
+  {
+    for (const [lo, hi] of [[1970, 1979], [2000, 2009]]) {
+      const p = await cleanPage(b, { width: 1440, height: 1200 });
+      await p.goto(BASE + "/next_watch.html?%24RELEASE_YEAR=" + encodeURIComponent(">= " + lo + " and <= " + hi),
+                   { waitUntil: "domcontentloaded", timeout: 120000 });
+      let ys = [];
+      for (let i = 0; i < 60; i++) {
+        ys = await p.evaluate(() => [...document.querySelectorAll('div[aria-label^="Open "]')]
+          .map((e) => { const m = ((e.parentElement || e).innerText || "").match(/\b(19|20)\d{2}\b/); return m ? +m[0] : null; })
+          .filter(Boolean));
+        if (ys.length) break;
+        await p.waitForTimeout(1000);
+      }
+      if (!ys.length) note("timeline", lo + "-" + hi + ": a year selection rendered NO films at all");
+      else {
+        const out = ys.filter((y) => y < lo || y > hi);
+        if (out.length) note("timeline", lo + "-" + hi + ": " + out.length + "/" + ys.length + " films fall OUTSIDE the selection (" + out.slice(0, 5).join(", ") + ")");
+        else ok(lo + "-" + hi + ": all " + ys.length + " films are inside the selection");
+      }
+      await p.close();
+    }
+    // The legacy `to` form must still be READ (old shared links), even though we no longer write it.
+    const q = await cleanPage(b, { width: 1440, height: 1200 });
+    await q.goto(BASE + "/next_watch.html?%24RELEASE_YEAR=" + encodeURIComponent("2000 to 2009"),
+                 { waitUntil: "domcontentloaded", timeout: 120000 });
+    await q.waitForTimeout(20000);
+    if (!/showing 2000/.test(await q.evaluate(() => document.body.innerText)))
+      note("timeline", "a legacy `to` link no longer reads as a selection (shared links silently become All Time)");
+    else ok("a legacy `to` link is still understood by the picker");
+    await q.close();
+  }
+
   console.log("\n[7] internal links resolve");
   const p = await cleanPage(b, { width: 1440, height: 1000 });
   await p.goto(BASE + "/index.html", { waitUntil: "networkidle", timeout: 90000 });

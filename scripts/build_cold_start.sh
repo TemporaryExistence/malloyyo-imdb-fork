@@ -43,11 +43,19 @@ command -v "$DUCKDB" >/dev/null || { echo "cold-start: no duckdb on PATH — SKI
 # pair_titles in SQL; if someone edits the Malloy and not this file, the cold page and the
 # post-rating page silently disagree and NOTHING catches it. So read the real values out of
 # the model and refuse to build on a mismatch.
-MODEL=dashboards/shared_queries.malloy
-M_VOTES=$(awk "/query: pair_titles is/,/^}/" "$MODEL" | grep -oE "numVotes > [0-9]+" | grep -oE "[0-9]+" | head -1)
-M_LIMIT=$(awk "/query: pair_titles is/,/^}/" "$MODEL" | grep -oE "limit: [0-9]+" | grep -oE "[0-9]+" | head -1)
-if [ -z "$M_VOTES" ] || [ -z "$M_LIMIT" ]; then
-  echo "cold-start: REFUSED — could not read pair_titles bounds out of $MODEL (did the query move or get renamed?)"
+# ⛑ FIND THE QUERY WHEREVER IT LIVES. It moved from shared_queries.malloy to
+# next_watch.malloy on 2026-08-08 (it needs the page-local RELEASE_YEAR given), and a
+# hardcoded path would have silently stopped guarding anything.
+MODEL=$(grep -l "query: pair_titles is" dashboards/*.malloy 2>/dev/null | head -1 || true)
+# ⛔ `|| true` ON EVERY EXTRACTION. Under `set -euo pipefail` a grep that matches nothing
+# exits 1 and kills the script MID-GUARD with no message — which is exactly what happened
+# the first time the query moved: the build printed nothing, returned 0, and shipped no
+# cache. A guard that dies quietly is worse than no guard, because the silence reads as a
+# pass. Every failure below must reach the explicit REFUSED branch.
+M_VOTES=$( { awk "/query: pair_titles is/,/^}/" "$MODEL" 2>/dev/null | grep -oE "numVotes > [0-9]+" | grep -oE "[0-9]+" | head -1; } || true)
+M_LIMIT=$( { awk "/query: pair_titles is/,/^}/" "$MODEL" 2>/dev/null | grep -oE "limit: [0-9]+" | grep -oE "[0-9]+" | head -1; } || true)
+if [ -z "$MODEL" ] || [ -z "$M_VOTES" ] || [ -z "$M_LIMIT" ]; then
+  echo "cold-start: REFUSED — could not read pair_titles bounds (model=${MODEL:-NOT FOUND}). Did the query move or get renamed?"
   exit 1
 fi
 if [ "$M_VOTES" != "$VOTE_FLOOR" ] || [ "$M_LIMIT" != "$ROW_LIMIT" ]; then
