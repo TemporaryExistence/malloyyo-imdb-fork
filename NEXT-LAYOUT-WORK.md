@@ -1,6 +1,11 @@
 # The page split + layout simplification — the plan, ready to execute
 
-**Status: STEPS 1-2 DONE 2026-08-06 · STEPS 3-5 (the page split) NOT STARTED.** This is the last outstanding item from Andrew's 2026-08-05 list, and the one he
+**Status: ✅ ALL STEPS DONE — 1-2 on 2026-08-06, 3-5 (the page split) on 2026-08-07 (commit `379e62e`).**
+Measured at the artifact 2026-08-07: `docs/rate.html` exists and serves 200; `next_watch.jsx` is **696
+lines** (was 1,591), new `rate.jsx` is **307**, with shared code in `lib/kit.jsx` (434), `lib/taste.js`
+(250) and `shared_queries.malloy`. The per-step detail below is kept as the record of what was decided
+and which premises turned out false — read §"three premises that were wrong" before touching either page.
+This was the last outstanding item from Andrew's 2026-08-05 list, and the one he
 weighted heaviest: *"The site feels 'hacky', not visually beautiful anymore. Too crowded, too many
 different layers of visuals, too many different placement styles, too many different things to click on
 to change the way the dataset is shown on different parts of the screen"* and *"instead of making one

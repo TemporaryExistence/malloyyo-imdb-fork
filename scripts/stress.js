@@ -661,10 +661,14 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // the swipe STAGE (card + its title + skip button + disclaimer) fits above
     // the fold at an EMULATED 390x844, and that the card is near-full-bleed. Both
     // describe the swipe card, which now lives in `../movie-swipe` (Watchpile).
-    // ⛔ OWED THERE, NOT DISCHARGED — and this one is the most expensive to lose,
-    // because the bug it caught presented as an emulator artifact and was written
-    // off as one once before it was understood to be a race. Watchpile's suite
-    // does not yet emulate a touch viewport at all. Recorded in its notes.
+    // ✅ DISCHARGED THERE 2026-08-06, RE-VERIFIED GREEN 2026-08-07 — this comment
+    // said "owed, not discharged" and that is no longer true. Watchpile's
+    // `scripts/smoke.cjs` DOES emulate a touch viewport now (`isMobile`/`hasTouch`
+    // at 390x844) and both halves pass: "the whole mobile stage fits the fold
+    // (844 of 844, emulated)" and "the mobile card is near-full-bleed (92% of
+    // width)". It FAILED on its first run there at 124px past the fold, which is
+    // the assertion earning its transfer rather than being copied green.
+    // Do not re-implement it here — the subject is still Watchpile's card.
   }
 
   console.log("\n[6e] profile sign, session history, viewport matrix, and swipe feel");
@@ -743,10 +747,14 @@ const g = (v) => encodeURIComponent(JSON.stringify(v));
     // then comes back, then lags"). The matrix re-ran the above-the-fold check at
     // 1366x768 / 1280x720 / 1024x768 / 414x896, because the original check ran at
     // 1440x900 only — never at a width where it overflowed.
-    // ⛔ BOTH ARE OWED TO WATCHPILE, NOT DISCHARGED. They are the two most
+    // ✅ BOTH DISCHARGED IN WATCHPILE, RE-VERIFIED GREEN 2026-08-07 (this comment
+    // previously read "OWED, NOT DISCHARGED" — stale). They were the two most
     // valuable swipe assertions in this file: one caught a defect no static check
     // could see, the other caught the class "we only ever measured one viewport".
-    // Recorded in Watchpile's notes.
+    // Both now live in `../movie-swipe/scripts/smoke.cjs` and pass there:
+    //   feel   -> "the swipe swaps cleanly, next card decoded in 427ms"
+    //   matrix -> 1366x768 / 1280x720 / 1024x768 / 414x896 all above the fold
+    // Full run 2026-08-07: 23 checks, 0 failures. See ../movie-swipe/OWED-FROM-THE-FORK.md.
   }
 
   // All three of these were found by Andrew USING the live site, not by this

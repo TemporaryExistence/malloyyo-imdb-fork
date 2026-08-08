@@ -1,6 +1,23 @@
-# RESUME HERE — malloyyo-imdb-fork (updated 2026-08-05, session 2)
+# RESUME HERE — malloyyo-imdb-fork (updated 2026-08-07)
 
 **Read this, then `CHARTER.md` — and in the charter, read §7 first: it amends everything above it.**
+
+---
+
+## 0. ⛔ THE PAGE SPLIT IS BUILT AND COMMITTED BUT **NOT LIVE** (2026-08-07)
+
+Measured, not inferred, on 2026-08-07:
+
+```
+local  docs/rate.html                                       serves 200
+commit 379e62e  "Split next_watch into rate.html + next_watch.html"   UNPUSHED (git log @{u}..HEAD)
+live   https://temporaryexistence.github.io/.../rate.html    404
+live   https://temporaryexistence.github.io/.../next_watch.html  200  (still the OLD 1,268-line page)
+```
+
+**Do not read "the split is done" as "the split shipped."** Everything §1's table calls done below the
+split line IS live; the split itself is one `bash scripts/push.sh` away and that push has not happened.
+Publishing this is outward-facing — Lloyd sees this site — so it is Andrew's call, not an agent's.
 
 ---
 
@@ -17,25 +34,36 @@ items, and their state:
 | Per-provider deep links | **Done, and bounded** — see §4. |
 | Fuzzy autofill on search | **Done** — his three examples verified in the browser. |
 | The fork's own legible recommender | **Done** — "What your ratings are doing" + a per-tile reason. |
-| **Per-page tool split + layout simplification** | **NOT STARTED.** The largest remaining item. |
+| **Per-page tool split + layout simplification** | **BUILT 2026-08-07 (`379e62e`), NOT PUSHED — see §0.** `next_watch.jsx` 1,591 → 696; new `rate.jsx` 307; shared code in `lib/kit.jsx`, `lib/taste.js`, `shared_queries.malloy`. |
 
-⛔ **NOTHING IS PUSHED.** The fork's changes and the whole new site are local only.
+⛔ **PUSH STATE (re-measured 2026-08-07):** everything through `2815db0` (2026-08-06) **is** on
+`origin/main` and live. **One commit is unpushed — `379e62e`, the page split.**
 Push the fork with `bash scripts/push.sh` — Sync All still does not cover this repo.
 
-## 2. WHAT ANDREW OWES
+## 2. WHAT ANDREW OWES — ✅ BOTH DISCHARGED (re-verified 2026-08-07)
 
-1. **Set `TMDB_READ_ACCESS_TOKEN` on `TemporaryExistence/malloyyo-imdb-fork`.** A fork does NOT inherit
-   the upstream repo's secrets; `gh secret list` returns empty. Until it is set, the weekly refresh
-   rebuilds the data and silently skips posters and where-to-watch. The workflow now fails loudly instead
-   of passing green, but only he can add the secret.
-2. **Name the swipe site.** `movie-swipe` is a placeholder and the repo, URL and title all follow from it.
+1. ✅ **`TMDB_READ_ACCESS_TOKEN` IS SET** (closed). Verified against the repo, not assumed:
+   ```
+   gh secret list --repo TemporaryExistence/malloyyo-imdb-fork
+     TMDB_API_KEY             2026-08-06T01:13:50Z
+     TMDB_READ_ACCESS_TOKEN   2026-08-06T01:16:08Z
+   ```
+   And the refresh actually ran green with it: `refresh-data` `workflow_dispatch` succeeded in 27m21s on
+   2026-08-06T01:13:58Z. The original text (*"`gh secret list` returns empty... only he can add the
+   secret"*) is **no longer true** and is preserved here only as the record of what the gap was.
+2. ✅ **The swipe site is named `Watchpile`** (closed, 2026-08-05) — Andrew delegated the naming
+   ("Generate your own name for the swipe site for now... it doesn't really matter"), so it is a working
+   name he may overrule, not a settled brand. See `../movie-swipe/profile.md`. The **directory** is still
+   `products/movie-swipe/` on purpose: nothing is published yet, so renaming it buys only sync churn.
+
+⚑ Still genuinely open, but it is **not** an Andrew-owes: the fork's own repo/URL are fine; **Watchpile
+has no git repo and no live URL yet** (target: GitHub Pages under `TemporaryExistence`).
 
 ## 3. THE TWO THINGS STILL OPEN, BOTH HIS ASKS
 
-- **"The site feels hacky, not visually beautiful. Too crowded, too many layers, too many things to
-  click."** → simplify the layout, and give each tool **its own page** so the good ones can carry the
-  site. Not started. It restructures `dashboards/next_watch.jsx` (1,500 lines), which is why it was left
-  rather than half-done.
+- ~~**"The site feels hacky... too crowded... give each tool its own page."**~~ → **BUILT 2026-08-07.**
+  `next_watch.jsx` went 1,591 → 696 lines and `rate.html` now owns the collecting job. **Still gated on
+  a push (§0), and Lloyd has not seen it.** The remaining question is his verdict, not more building.
 - Everything else from the meeting is built.
 
 ## 4. WHAT IS TRUE BUT EASY TO MISREAD
