@@ -45,6 +45,18 @@ Pushing is via the repo's own gated script, not a bare `git push`:
 bash /home/andrew/Project/work/products/malloyyo-imdb-fork/scripts/push.sh
 ```
 
+```launch-manifest
+CANONICAL: work/products/malloyyo-imdb-fork
+RUN_MODEL: static site; Malloy + DuckDB-WASM in the visitor's browser; parquet served from the repo; zero backend
+DEPLOY_STATUS: not-yet
+LAUNCH_CMD: bash scripts/build.sh && python3 scripts/serve.py docs 8810
+NOT_THE_PRODUCT: work/products/movie-swipe (Watchpile, the swipe site); malloy-preview (the Malloy MARKETING site, a web-agency client preview); https://lloydtabb.github.io/malloyyo-imdb (upstream, Lloyd's own)
+```
+⚠ `DEPLOY_STATUS: not-yet` is deliberate: GitHub Pages from `docs/` on
+`TemporaryExistence/malloyyo-imdb-fork` is the intended surface, but **the push is Andrew's and had not
+happened as of 2026-08-09**. Flip to `live` + fill `DEPLOY_URL` only after the published page is opened
+and confirmed — not when the push is run.
+
 ## The one thing that makes it different
 **Zero backend, nothing leaves the visitor's machine.** DuckDB-WASM + Malloy run in the browser; even
 the personal ratings join is a localStorage CSV registered into DuckDB at page load. The no-backend
