@@ -6,6 +6,14 @@
   delegation rather than claiming independent authority: ratification is normally his alone.
 - **Upstream:** https://github.com/lloydtabb/malloyyo-imdb · https://lloydtabb.github.io/malloyyo-imdb/
 - **Origin:** Lloyd challenged Andrew to add two features. His framing is the goal, quoted below.
+- ⚑ **PROVENANCE — checked deliberately 2026-08-19, and this one is CLEAN.** **This is Lloyd's project**:
+  a fork of his repo, built at his own request, and everything here is a contribution back to it. That is
+  a different footing from the sibling `products/movie-swipe` (Watchpile), which Andrew ruled on the same
+  day: *"shipping watchpile would be stealing lloyd's idea."* **The distinction is CONSENT, not effort** —
+  he asked for F1 and F2; nobody asked for a separate swipe product. F3-F5 are Andrew's expansion **within
+  Lloyd's project**, not a licence to spin anything out of it. Before any outward step here, the question
+  is *whose idea is this, and did they give it to us?* — and "they abandoned it" or "we already built it"
+  are not answers.
 
 ---
 
